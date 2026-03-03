@@ -25,18 +25,26 @@ export interface Anomaly {
   area_percentage: number;
 }
 
+/**
+ * Row returned from the FastAPI + Supabase /inspections endpoint.
+ * Mirrors the columns inserted in api.py.
+ */
 export interface Inspection {
-  id: string;
-  status: InspectionStatus;
+  id: string; // Supabase row id (uuid)
+  inspection_id: string;
+  status: InspectionStatus | string;
   created_at: string;
-  vessel_name?: string;
-  file_name?: string;
-  image_url?: string;
-  annotated_image_url?: string;
-  anomalies: Anomaly[];
-  hull_coverage: number;
-  risk_score: number;
-  notes?: string;
+  file_name?: string | null;
+  detected_classes?: string[] | null;
+  highest_confidence?: number | null;
+  risk_level?: string | null;
+  inference_time?: number | null;
+  precision?: number | null;
+  recall?: number | null;
+  map50?: number | null;
+  map5095?: number | null;
+  image_url?: string | null;
+  annotated_image_url?: string | null;
 }
 
 export interface DashboardStats {
@@ -44,4 +52,37 @@ export interface DashboardStats {
   high_risk_count: number;
   total_anomalies: number;
   avg_risk_score: number;
+}
+
+export interface DetectionBox {
+  class_name: string;
+  confidence: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface DetectionSummary {
+  total: number;
+  risk_level: string;
+  avg_confidence: number;
+  max_confidence: number;
+  inference_time_ms: number;
+}
+
+export interface ModelMetrics {
+  precision: number;
+  recall: number;
+  map50: number;
+  map5095: number;
+}
+
+export interface DetectResponse {
+  inspection_id: string;
+  detections: DetectionBox[];
+  annotated_image: string; // base64 data URI
+  summary: DetectionSummary;
+  model_metrics: ModelMetrics;
+  timestamp: string;
 }

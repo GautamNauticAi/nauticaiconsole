@@ -1,11 +1,18 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { PageShell } from "@/components/PageShell";
-import { MOCK_INSPECTIONS, api } from "@/lib/api";
-import type { Anomaly, Severity } from "@/types";
+import { api } from "@/lib/api";
+import type {
+  Anomaly,
+  Severity,
+  DetectResponse,
+  DetectionBox,
+  Inspection,
+} from "@/types";
 
 const severityColor: Record<Severity, string> = {
   low:      "#10b981",
@@ -99,10 +106,45 @@ function AnomalyCard({ a }: { a: Anomaly }) {
 
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
-  const inspection = MOCK_INSPECTIONS.find((i) => i.id === id) ?? MOCK_INSPECTIONS[0];
+  const searchParams = useSearchParams();
+  const [liveDetect, setLiveDetect] = useState<DetectResponse | null>(null);
+  const [inspection, setInspection] = useState<Inspection | null>(null);
 
-  const criticalCount = inspection.anomalies.filter((a) => a.severity === "critical").length;
-  const highCount     = inspection.anomalies.filter((a) => a.severity === "high").length;
+  const fromLive = searchParams.get("source") === "live";
+
+  useEffect(() => {
+    if (!id) return;
+
+    if (fromLive && typeof window !== "undefined") {
+      const raw = sessionStorage.getItem("nauticai:lastInspection");
+      if (raw) {
+        try {
+          const parsed: DetectResponse = JSON.parse(raw);
+          if (parsed.inspection_id === id) {
+            setLiveDetect(parsed);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+
+    // Always try to load inspection metadata from backend for header + stats
+    api
+      .getInspection(id)
+      .then((ins) => {
+        if (ins) setInspection(ins);
+      })
+      .catch(() => {
+        /* backend might be offline; ok to skip, page still shows live data */
+      });
+  }, [fromLive, id]);
+
+  const criticalCount = 0;
+  const highCount = 0;
+
+  const annotatedSrc =
+    liveDetect?.annotated_image || inspection?.annotated_image_url || null;
 
   return (
     <PageShell>
@@ -112,16 +154,22 @@ export default function ResultsPage() {
         <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <Link href="/dashboard" style={{ fontSize: 12, color: "rgba(186,230,255,0.50)", textDecoration: "none" }}>← Dashboard</Link>
-              <span style={{ color: "rgba(255,255,255,0.20)" }}>/</span>
-              <span style={{ fontSize: 12, color: "rgba(186,230,255,0.50)" }}>Results</span>
+              <Link href="/dashboard" style={{ fontSize: 12, color: "rgba(186,230,255,0.65)", textDecoration: "none" }}>← Dashboard</Link>
+              <span style={{ color: "rgba(255,255,255,0.18)" }}>/</span>
+              <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)" }}>Results</span>
             </div>
-            <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-              {inspection.vessel_name ?? "Unnamed Vessel"}
+            <h1 style={{ fontSize: "1.9rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
+              {inspection?.file_name ?? "Hull inspection results"}
             </h1>
-            <p style={{ fontSize: 12, color: "rgba(186,230,255,0.50)", marginTop: 3 }}>
-              Inspection ID: <span style={{ fontFamily: "monospace" }}>{inspection.id}</span> · {new Date(inspection.created_at).toLocaleString()}
-            </p>
+            {inspection && (
+              <p style={{ fontSize: 12, color: "rgba(226,238,255,0.72)", marginTop: 6 }}>
+                Inspection ID:{" "}
+                <span style={{ fontFamily: "monospace" }}>
+                  {inspection.inspection_id}
+                </span>{" "}
+                · {new Date(inspection.created_at).toLocaleString()}
+              </p>
+            )}
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <a href={api.exportReportUrl(inspection.id)} target="_blank" rel="noreferrer" style={{
@@ -143,46 +191,111 @@ export default function ResultsPage() {
         </div>
 
         {/* Summary strip */}
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 24,
-        }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(5, 1fr)",
+            gap: 12,
+            marginBottom: 24,
+          }}
+        >
           {[
-            { label: "Anomalies",      value: inspection.anomalies.length,            color: "#f59e0b" },
-            { label: "Critical",       value: criticalCount,                           color: "#dc2626" },
-            { label: "High Risk",      value: highCount,                               color: "#ef4444" },
-            { label: "Hull Coverage",  value: `${inspection.hull_coverage}%`,          color: "#10b981" },
-            { label: "File",           value: inspection.file_name ?? "—",             color: "#94a3b8" },
+            {
+              label: "Detections",
+              value: liveDetect?.summary.total ?? inspection?.detected_classes?.length ?? 0,
+              color: "#f59e0b",
+            },
+            { label: "Critical", value: criticalCount, color: "#dc2626" },
+            { label: "High Risk", value: highCount, color: "#ef4444" },
+            {
+              label: "Risk level",
+              value: liveDetect?.summary.risk_level ?? inspection?.risk_level ?? "—",
+              color: "#e5e7eb",
+            },
+            {
+              label: "File",
+              value: inspection?.file_name ?? "—",
+              color: "#94a3b8",
+            },
           ].map((s) => (
-            <div key={s.label} style={{
-              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 12, padding: "14px 16px",
-            }}>
-              <p style={{ fontSize: 10, fontWeight: 600, color: "rgba(186,230,255,0.45)", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 4 }}>{s.label}</p>
-              <p style={{ fontSize: 16, fontWeight: 800, color: s.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.value}</p>
+            <div
+              key={s.label}
+              style={{
+                background: "rgba(5,5,20,0.80)",
+                border: "1px solid rgba(148,163,184,0.40)",
+                borderRadius: 12,
+                padding: "14px 16px",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "rgba(186,230,255,0.55)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.09em",
+                  marginBottom: 4,
+                }}
+              >
+                {s.label}
+              </p>
+              <p
+                style={{
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: s.color,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {s.value}
+              </p>
             </div>
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.35fr 0.9fr", gap: 20 }}>
 
           {/* Annotated image */}
           <div style={{
-            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(5,5,20,0.78)", border: "1px solid rgba(148,163,184,0.40)",
             borderRadius: 16, overflow: "hidden",
           }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>Annotated Hull Image</span>
-              <span style={{ fontSize: 11, color: "rgba(186,230,255,0.45)" }}>Bounding boxes shown for each anomaly</span>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(148,163,184,0.45)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>Annotated hull image</span>
+              <span style={{ fontSize: 11, color: "rgba(186,230,255,0.65)" }}>Bounding boxes for each detected anomaly</span>
             </div>
             <div style={{ padding: 20, position: "relative" }}>
-              {inspection.annotated_image_url ? (
-                <div style={{ position: "relative", borderRadius: 10, overflow: "hidden" }}>
-                  <Image
-                    src={inspection.annotated_image_url}
-                    alt="Annotated hull"
-                    width={800} height={500}
-                    style={{ width: "100%", height: "auto", display: "block", borderRadius: 10 }}
-                  />
+              {annotatedSrc ? (
+                <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", background: "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.26), transparent 60%), radial-gradient(circle at 80% 100%, rgba(59,130,246,0.42), transparent 60%)" }}>
+                  {liveDetect ? (
+                    // For live detections we receive a data URI, use a plain img tag
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={annotatedSrc}
+                      alt="Annotated hull"
+                      style={{
+                        width: "100%",
+                        height: "auto",
+                        display: "block",
+                        borderRadius: 10,
+                      }}
+                    />
+                  ) : (
+                    <Image
+                      src={annotatedSrc}
+                      alt="Annotated hull"
+                      width={800}
+                      height={500}
+                      style={{
+                        width: "100%",
+                        height: "auto",
+                        display: "block",
+                        borderRadius: 10,
+                      }}
+                    />
+                  )}
                   {/* Overlay bounding boxes */}
                   <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
                     {inspection.anomalies.map((a) => {
@@ -199,7 +312,7 @@ export default function ResultsPage() {
                           <rect
                             x={`${(a.bbox.x1 / 800) * 100}%`}
                             y={`calc(${(a.bbox.y1 / 500) * 100}% - 18px)`}
-                            width="90" height="16"
+                            width="96" height="16"
                             fill={c} rx="3"
                           />
                           <text
@@ -215,14 +328,23 @@ export default function ResultsPage() {
                   </svg>
                 </div>
               ) : (
-                <div style={{
-                  height: 300, borderRadius: 10,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px dashed rgba(255,255,255,0.15)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "rgba(186,230,255,0.35)", fontSize: 13,
-                }}>
-                  Annotated image not available
+                <div
+                  style={{
+                    height: 300,
+                    borderRadius: 14,
+                    background: "rgba(15,23,42,0.90)",
+                    border: "1px dashed rgba(148,163,184,0.60)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "rgba(186,230,255,0.75)",
+                    fontSize: 13,
+                    textAlign: "center",
+                    padding: "0 24px",
+                  }}
+                >
+                  Annotated hull image will appear here once the detection API
+                  returns overlays for this inspection.
                 </div>
               )}
             </div>
@@ -233,7 +355,7 @@ export default function ResultsPage() {
 
             {/* Risk gauge */}
             <div style={{
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(5,5,20,0.80)", border: "1px solid rgba(148,163,184,0.45)",
               borderRadius: 16, padding: "20px",
               display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
             }}>
@@ -243,7 +365,7 @@ export default function ResultsPage() {
 
             {/* Anomaly list */}
             <div style={{
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(5,5,20,0.80)", border: "1px solid rgba(148,163,184,0.45)",
               borderRadius: 16, padding: "16px 18px", flex: 1,
             }}>
               <span style={{ fontSize: 13, fontWeight: 700, display: "block", marginBottom: 14 }}>Detected Anomalies</span>
