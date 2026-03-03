@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -95,8 +96,13 @@ export default function Home() {
             position: "absolute", left: "50%", transform: "translateX(-50%)",
             display: "flex", gap: 36,
           }}>
-            {["How it works", "Solutions", "About", "Contact"].map((l) => (
-              <a key={l} className="nav-link" href="#" style={{
+            {[
+              { label: "Dashboard", href: "/dashboard" },
+              { label: "Inspect",   href: "/inspect"   },
+              { label: "Reports",   href: "/reports"   },
+              { label: "About",     href: "https://www.nauticai-ai.com/" },
+            ].map((l) => (
+              <Link key={l.href} href={l.href} className="nav-link" style={{
                 fontSize: 13, fontWeight: 600,
                 background: "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
                 WebkitBackgroundClip: "text",
@@ -104,19 +110,19 @@ export default function Home() {
                 textDecoration: "none",
                 letterSpacing: "-0.005em",
                 transition: "opacity 0.2s",
-              }}>{l}</a>
+              }}>{l.label}</Link>
             ))}
           </nav>
 
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <a href="#" className="nav-link" style={{
+            <Link href="/login" className="nav-link" style={{
               fontSize: 13, fontWeight: 600,
               background: "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
               textDecoration: "none",
               transition: "opacity 0.2s",
-            }}>Log In</a>
+            }}>Log In</Link>
             <a href="mailto:contact@nauticai.com" style={{
               fontSize: 13, fontWeight: 700, color: "#0d0422",
               background: "#fff",
@@ -175,7 +181,7 @@ export default function Home() {
               display: "flex", alignItems: "center", gap: 22,
               animation: "fade-up 0.7s ease 0.4s both",
             }}>
-              <a href="#" style={{
+              <Link href="/inspect" style={{
                 display: "inline-flex", alignItems: "center", gap: 7,
                 fontSize: 13, fontWeight: 700, color: "#0d0422",
                 background: "#fff",
@@ -187,14 +193,14 @@ export default function Home() {
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path fillRule="evenodd" d="M6.22 3.22a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06L7.28 12.78a.75.75 0 01-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                 </svg>
-              </a>
-              <a className="cta-ghost" href="#" style={{
+              </Link>
+              <Link className="cta-ghost" href="/dashboard" style={{
                 fontSize: 13, fontWeight: 500,
                 color: "rgba(186,230,255,0.72)",
                 textDecoration: "none", transition: "color 0.2s",
               }}>
                 See how it works
-              </a>
+              </Link>
             </div>
           </div>
 

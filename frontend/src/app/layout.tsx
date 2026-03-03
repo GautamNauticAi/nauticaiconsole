@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NautiCAI | Hull Check",
+  title: "NautiCAI — AI Hull Inspection",
   description:
     "NautiCAI turns underwater hull footage into clear, plain-language findings for corrosion, marine growth, and damage.",
 };
