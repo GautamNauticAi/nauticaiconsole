@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
 import { api } from "@/lib/api";
@@ -8,45 +8,103 @@ import type { DetectResponse } from "@/types";
 
 type Stage = "idle" | "selected" | "uploading" | "processing" | "done" | "error";
 
-const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"];
+const ACCEPTED_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "video/mp4",
+  "video/quicktime",
+];
+
+/* ─── shared tokens ─────────────────────────────────────────────── */
+const CARD: React.CSSProperties = {
+  background: "rgba(8, 10, 30, 0.72)",
+  backdropFilter: "blur(18px)",
+  WebkitBackdropFilter: "blur(18px)",
+  borderRadius: 16,
+  border: "1px solid rgba(129, 140, 248, 0.22)",
+  boxShadow: "0 6px 28px rgba(0,0,0,0.50)",
+  padding: 14,
+};
+
+const LABEL: React.CSSProperties = {
+  display: "block",
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "rgba(186,230,255,0.50)",
+  marginBottom: 5,
+};
+
+const INPUT_BASE: React.CSSProperties = {
+  width: "100%",
+  fontSize: 12,
+  fontWeight: 500,
+  background: "rgba(15,23,42,0.90)",
+  border: "1px solid rgba(129,140,248,0.30)",
+  borderRadius: 8,
+  padding: "7px 11px",
+  color: "#fff",
+  outline: "none",
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+  appearance: "none",
+  WebkitAppearance: "none",
+};
+
+const STEP_LABEL: React.CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  color: "rgba(186,230,255,0.42)",
+  textTransform: "uppercase",
+  letterSpacing: "0.14em",
+  marginBottom: 6,
+};
 
 export default function InspectPage() {
   const router = useRouter();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
   const [stage, setStage] = useState<Stage>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [vesselName, setVesselName] = useState("");
   const [notes, setNotes] = useState("");
-  const [drag, setDrag] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState(0);
   const [errMsg, setErrMsg] = useState("");
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem("nauticai:token");
+    if (!token) router.replace("/login");
+  }, [router]);
+
   const acceptFile = useCallback((f: File) => {
-    if (!ACCEPTED.includes(f.type)) {
+    if (!ACCEPTED_TYPES.includes(f.type)) {
       setErrMsg("Only JPG, PNG, WebP or MP4 files are accepted.");
       return;
     }
     setFile(f);
     setStage("selected");
-    if (f.type.startsWith("image/")) {
-      const url = URL.createObjectURL(f);
-      setPreview(url);
-    } else {
-      setPreview(null);
-    }
+    if (f.type.startsWith("image/")) setPreview(URL.createObjectURL(f));
+    else setPreview(null);
     setErrMsg("");
   }, []);
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDrag(false);
-    const f = e.dataTransfer.files[0];
-    if (f) acceptFile(f);
-  }, [acceptFile]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setDragActive(false);
+      const f = e.dataTransfer.files?.[0];
+      if (f) acceptFile(f);
+    },
+    [acceptFile],
+  );
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
     if (f) acceptFile(f);
   };
 
@@ -54,43 +112,24 @@ export default function InspectPage() {
     if (!file) return;
     setStage("uploading");
     setProgress(0);
-
-    /* Simulate progress bar while uploading */
-    const tick = setInterval(() => {
+    setErrMsg("");
+    const tick = window.setInterval(() => {
       setProgress((p) => Math.min(p + 12, 85));
     }, 180);
-
     try {
-      let detectRes: DetectResponse;
-      try {
-        detectRes = await api.upload(file, vesselName || undefined);
-      } catch (e) {
-        throw e;
-      }
-
-      clearInterval(tick);
+      const res: DetectResponse = await api.upload(file, vesselName || undefined);
+      window.clearInterval(tick);
       setProgress(100);
       setStage("processing");
-
-      await new Promise((r) => setTimeout(r, 1200));
-
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       setStage("done");
-      // Persist latest detection so the results page can reconstruct
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(
-          "nauticai:lastInspection",
-          JSON.stringify(detectRes)
-        );
-      }
-      setTimeout(
-        () =>
-          router.push(
-            `/results/${encodeURIComponent(detectRes.inspection_id)}?source=live`
-          ),
-        600
-      );
+      if (typeof window !== "undefined")
+        window.sessionStorage.setItem("nauticai:lastInspection", JSON.stringify(res));
+      setTimeout(() => {
+        router.push(`/results/${encodeURIComponent(res.inspection_id)}?source=live`);
+      }, 600);
     } catch (err) {
-      clearInterval(tick);
+      window.clearInterval(tick);
       setStage("error");
       setErrMsg(err instanceof Error ? err.message : "Unexpected error");
     }
@@ -106,530 +145,418 @@ export default function InspectPage() {
     setErrMsg("");
   };
 
+  const isRunning = stage === "uploading" || stage === "processing";
+  const canRun = stage === "selected";
+
   return (
     <PageShell>
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 48px" }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 32 }}>
-          <h1
+      {/* ── outer wrapper: tight vertical padding to keep everything above the fold ── */}
+      <div
+        style={{
+          maxWidth: 1140,
+          margin: "0 auto",
+          padding: "10px 24px 12px",
+          /* prevent the page from ever being taller than the viewport minus navbar */
+          maxHeight: "calc(100vh - 64px)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* ── Header ── */}
+        <div style={{ marginBottom: 10, flexShrink: 0 }}>
+          <p
             style={{
-              fontSize: "1.75rem",
-              fontWeight: 800,
-              letterSpacing: "-0.03em",
-              marginBottom: 4,
+              fontSize: 9,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.20em",
+              color: "rgba(186,230,255,0.45)",
+              marginBottom: 3,
             }}
           >
             Detection Console
+          </p>
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              letterSpacing: "-0.03em",
+              lineHeight: 1.1,
+              marginBottom: 4,
+              background: "linear-gradient(90deg, #fff 55%, #a5b4fc)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}
+          >
+            Hull Inspection Workflow
           </h1>
-          <p style={{ fontSize: 13, color: "rgba(186,230,255,0.60)", maxWidth: 520 }}>
-            Upload hull footage, add basic context, and run the hull model to surface corrosion, marine growth, debris and
-            structural damage — all in one place.
+          <p
+            style={{
+              fontSize: 11,
+              color: "rgba(186,230,255,0.55)",
+              lineHeight: 1.5,
+            }}
+          >
+            Upload hull footage, add context, then run the YOLOv8 model to generate a structured inspection.
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
+        {/* ── 3-column grid ── */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1.9fr) minmax(0,1.6fr) minmax(0,1fr)",
+            gap: 14,
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          {/* ═══ COL 1 — Upload ═══ */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+            <p style={STEP_LABEL}>Step 1 · Upload footage</p>
 
-          {/* LEFT — Upload zone */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "rgba(186,230,255,0.55)",
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-              }}
-            >
-              Step 1 · Upload hull footage
-            </p>
-
+            {/* drop zone — fills remaining col height */}
             <div
+              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+              onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+              onDrop={handleDrop}
+              onClick={() => inputRef.current?.click()}
               style={{
-                background: "rgba(255,255,255,0.03)",
-                border: `1px solid ${
-                  drag ? "rgba(124,58,237,0.70)" : "rgba(255,255,255,0.10)"
-                }`,
-                borderRadius: 18,
-                overflow: "hidden",
+                ...CARD,
+                flex: 1,
+                minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                transition: "border-color 0.2s, background 0.2s",
+                justifyContent: "center",
+                alignItems: "center",
+                textAlign: "center",
+                cursor: "pointer",
+                border: dragActive
+                  ? "1.5px solid rgba(129,140,248,0.90)"
+                  : "1.5px dashed rgba(129,140,248,0.28)",
+                background: dragActive
+                  ? "rgba(59,130,246,0.12)"
+                  : "radial-gradient(ellipse at top left, rgba(59,130,246,0.10) 0%, transparent 60%), rgba(8,10,30,0.72)",
+                boxShadow: dragActive
+                  ? "0 0 0 3px rgba(129,140,248,0.16), 0 12px 36px rgba(56,189,248,0.22)"
+                  : "0 6px 28px rgba(0,0,0,0.50)",
+                transition: "border-color 0.18s, box-shadow 0.18s, background 0.18s",
+                padding: 16,
+                gap: 0,
               }}
             >
-              {/* Drop area */}
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDrag(true);
-                }}
-                onDragLeave={() => setDrag(false)}
-                onDrop={onDrop}
-                onClick={() => stage === "idle" && inputRef.current?.click()}
-                style={{
-                  flex: 1,
-                  minHeight: 320,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 14,
-                  padding: 32,
-                  cursor: stage === "idle" ? "pointer" : "default",
-                  position: "relative",
-                }}
-              >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept={ACCEPTED.join(",")}
-                  onChange={onFileChange}
-                  style={{ display: "none" }}
-                />
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ACCEPTED_TYPES.join(",")}
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
 
-                {/* States */}
-                {stage === "idle" && (
-                  <>
-                    <div
-                      style={{
-                        width: 72,
-                        height: 72,
-                        borderRadius: 20,
-                        background: "rgba(15,23,42,0.85)",
-                        border: `1px dashed ${
-                          drag
-                            ? "rgba(124,58,237,0.80)"
-                            : "rgba(148,163,184,0.60)"
-                        }`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        transition: "all 0.2s",
-                      }}
-                    >
-                      <svg
-                        width="26"
-                        height="26"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="rgba(226,232,240,0.80)"
-                        strokeWidth={1.6}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M9.75 12 12 9.75 14.25 12M12 9.75V3"
-                        />
-                      </svg>
-                    </div>
-                    <div style={{ textAlign: "center" }}>
-                      <p
-                        style={{
-                          fontSize: 15,
-                          fontWeight: 700,
-                          color: "#fff",
-                          marginBottom: 4,
-                        }}
-                      >
-                        {drag ? "Drop to upload" : "Drag & drop hull footage"}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: 12,
-                          color: "rgba(186,230,255,0.60)",
-                        }}
-                      >
-                        JPG, PNG, WebP, MP4 · Max 200 MB
-                      </p>
-                    </div>
-                    <button
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#e5e7eb",
-                        background: "rgba(15,23,42,0.9)",
-                        border: "1px solid rgba(148,163,184,0.65)",
-                        borderRadius: 8,
-                        padding: "7px 18px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Browse files
-                    </button>
-                  </>
-                )}
-
-                {stage === "selected" && preview && (
-                  <div style={{ width: "100%", position: "relative" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={preview}
-                      alt="preview"
-                      style={{
-                        width: "100%",
-                        borderRadius: 12,
-                        maxHeight: 320,
-                        objectFit: "contain",
-                      }}
-                    />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        reset();
-                      }}
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        background: "rgba(0,0,0,0.60)",
-                        border: "none",
-                        borderRadius: 999,
-                        width: 28,
-                        height: 28,
-                        cursor: "pointer",
-                        color: "#fff",
-                        fontSize: 14,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )}
-
-                {stage === "selected" && !preview && (
-                  <div style={{ textAlign: "center" }}>
-                    <p
-                      style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}
-                    >
-                      {file?.name}
-                    </p>
-                    <p
-                      style={{
-                        fontSize: 12,
-                        color: "rgba(186,230,255,0.50)",
-                      }}
-                    >
-                      {file ? `${(file.size / 1_000_000).toFixed(1)} MB` : ""}
-                    </p>
-                  </div>
-                )}
-
-                {(stage === "uploading" || stage === "processing") && (
-                  <div style={{ width: "100%", textAlign: "center" }}>
-                    <div style={{ marginBottom: 24 }}>
-                      <div
-                        style={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: "50%",
-                          border: "3px solid rgba(255,255,255,0.10)",
-                          borderTop: "3px solid #7c3aed",
-                          margin: "0 auto 16px",
-                          animation: "spin 0.9s linear infinite",
-                        }}
-                      />
-                      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                      <p
-                        style={{
-                          fontSize: 15,
-                          fontWeight: 700,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {stage === "uploading"
-                          ? "Uploading…"
-                          : "Running YOLOv8 detection…"}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: 12,
-                          color: "rgba(186,230,255,0.50)",
-                        }}
-                      >
-                        {stage === "processing"
-                          ? "Scanning hull for anomalies"
-                          : "Transferring file"}
-                      </p>
-                    </div>
-                    {stage === "uploading" && (
-                      <div
-                        style={{
-                          height: 5,
-                          background: "rgba(255,255,255,0.10)",
-                          borderRadius: 999,
-                          overflow: "hidden",
-                          maxWidth: 320,
-                          margin: "0 auto",
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            background:
-                              "linear-gradient(90deg, #7c3aed, #3b82f6)",
-                            borderRadius: 999,
-                            width: `${progress}%`,
-                            transition: "width 0.2s ease",
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {stage === "done" && (
-                  <div style={{ textAlign: "center" }}>
-                    <div
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: "50%",
-                        background: "rgba(16,185,129,0.15)",
-                        border: "2px solid #10b981",
-                        margin: "0 auto 14px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 28,
-                      }}
-                    >
-                      ✓
-                    </div>
-                    <p
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: "#10b981",
-                      }}
-                    >
-                      Detection complete
-                    </p>
-                    <p
-                      style={{
-                        fontSize: 12,
-                        color: "rgba(186,230,255,0.50)",
-                        marginTop: 4,
-                      }}
-                    >
-                      Redirecting to results…
-                    </p>
-                  </div>
-                )}
-
-                {stage === "error" && (
-                  <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 32, marginBottom: 10 }}>⚠</div>
-                    <p
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        color: "#ef4444",
-                        marginBottom: 8,
-                      }}
-                    >
-                      {errMsg}
-                    </p>
-                    <button
-                      onClick={reset}
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: "rgba(239,68,68,0.20)",
-                        border: "1px solid rgba(239,68,68,0.40)",
-                        borderRadius: 8,
-                        padding: "6px 16px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Try again
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* File info bar */}
-              {file && stage === "selected" && (
-                <div
+              {preview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={preview}
+                  alt="Preview"
                   style={{
-                    borderTop: "1px solid rgba(255,255,255,0.07)",
-                    padding: "10px 20px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    background: "rgba(255,255,255,0.03)",
+                    maxWidth: "100%",
+                    maxHeight: "75%",
+                    borderRadius: 10,
+                    objectFit: "cover",
+                    border: "1px solid rgba(56,189,248,0.35)",
                   }}
-                >
-                  <span
+                />
+              ) : (
+                <>
+                  {/* upload icon */}
+                  <div
                     style={{
-                      fontSize: 12,
-                      color: "rgba(186,230,255,0.60)",
-                      fontFamily: "monospace",
+                      width: 46,
+                      height: 46,
+                      borderRadius: 14,
+                      background: "rgba(129,140,248,0.12)",
+                      border: "1px solid rgba(129,140,248,0.24)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 12,
                     }}
                   >
-                    {file.name}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "rgba(186,230,255,0.40)",
-                    }}
-                  >
-                    {(file.size / 1_000_000).toFixed(2)} MB
-                  </span>
-                </div>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(165,180,252,0.85)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </div>
+
+                  <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: "rgba(226,232,240,0.95)" }}>
+                    Drag &amp; drop hull media here
+                  </p>
+                  <p style={{ fontSize: 11, color: "rgba(148,163,184,0.75)", marginBottom: 12 }}>
+                    or click to browse from device
+                  </p>
+
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                    {["JPG · PNG · WebP", "MP4 / MOV", "< 500 MB"].map((t) => (
+                      <span
+                        key={t}
+                        style={{
+                          borderRadius: 999,
+                          border: "1px solid rgba(129,140,248,0.35)",
+                          background: "rgba(15,23,42,0.75)",
+                          padding: "2px 9px",
+                          fontSize: 9,
+                          fontWeight: 600,
+                          color: "rgba(191,219,254,0.82)",
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+
+                  {dragActive && (
+                    <p style={{ marginTop: 10, fontSize: 11, color: "rgba(165,180,252,0.95)", fontWeight: 600 }}>
+                      Drop to upload
+                    </p>
+                  )}
+                </>
               )}
             </div>
+
+            {/* file chip */}
+            {file && (
+              <div
+                style={{
+                  ...CARD,
+                  padding: "8px 12px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, color: "rgba(226,232,240,0.95)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>
+                    {file.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: "rgba(148,163,184,0.80)", marginTop: 1 }}>
+                    {(file.size / 1_000_000).toFixed(2)} MB · {file.type || "media"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={reset}
+                  style={{
+                    all: "unset",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    borderRadius: 999,
+                    border: "1px solid rgba(248,113,113,0.65)",
+                    padding: "3px 10px",
+                    color: "rgba(254,202,202,0.95)",
+                    background: "rgba(127,29,29,0.40)",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+
+            {/* progress */}
+            {isRunning && (
+              <div style={{ flexShrink: 0 }}>
+                <div style={{ height: 4, borderRadius: 999, background: "rgba(15,23,42,0.90)", overflow: "hidden", marginBottom: 5 }}>
+                  <div style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg, #38bdf8, #818cf8)", transition: "width 0.18s ease-out" }} />
+                </div>
+                <p style={{ fontSize: 10, color: "rgba(191,219,254,0.85)" }}>
+                  {stage === "uploading" ? "Uploading footage to NautiCAI…" : "Running YOLOv8 hull model…"}
+                </p>
+              </div>
+            )}
+
+            {errMsg && <p style={{ fontSize: 11, color: "#fca5a5", flexShrink: 0 }}>{errMsg}</p>}
           </div>
 
-          {/* RIGHT — Settings panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* ═══ COL 2 — Inspection Details + Run button ═══ */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+            <p style={STEP_LABEL}>Step 2 · Inspection details</p>
 
-            {/* Vessel info */}
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "rgba(186,230,255,0.55)",
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-                marginBottom: 4,
-              }}
-            >
-              Step 2 · Inspection details
-            </p>
-            <div
-              style={{
-                background: "rgba(5,5,20,0.80)",
-                border: "1px solid rgba(255,255,255,0.10)",
-                borderRadius: 16,
-                padding: "20px",
-              }}
-            >
-              <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 16 }}>Inspection Details</p>
+            <div style={{ ...CARD, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  marginBottom: 12,
+                  color: "rgba(226,232,240,0.96)",
+                  borderBottom: "1px solid rgba(129,140,248,0.15)",
+                  paddingBottom: 10,
+                  flexShrink: 0,
+                }}
+              >
+                Inspection Details
+              </p>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.50)", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                    Vessel Name
-                  </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
+                <div style={{ flexShrink: 0 }}>
+                  <label style={LABEL}>Vessel Name</label>
                   <input
                     value={vesselName}
                     onChange={(e) => setVesselName(e.target.value)}
                     placeholder="e.g. MV Pacific Star"
-                    style={{
-                      width: "100%", fontSize: 13, fontWeight: 500,
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 8, padding: "9px 12px", color: "#fff",
-                      outline: "none", fontFamily: "inherit",
-                    }}
+                    style={INPUT_BASE}
                   />
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.50)", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                    Notes (optional)
-                  </label>
+
+                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                  <label style={LABEL}>Notes (optional)</label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
                     placeholder="Port side scan, pre-dry dock…"
                     style={{
-                      width: "100%", fontSize: 13, fontWeight: 500,
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 8, padding: "9px 12px", color: "#fff",
-                      outline: "none", resize: "vertical", fontFamily: "inherit",
+                      ...INPUT_BASE,
+                      resize: "none",
+                      flex: 1,
+                      minHeight: 0,
                     }}
                   />
                 </div>
               </div>
             </div>
 
-            {/* Model settings */}
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "rgba(186,230,255,0.55)",
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-                marginBottom: 4,
-              }}
-            >
-              Step 3 · Model configuration
-            </p>
-            <div
-              style={{
-                background: "rgba(5,5,20,0.80)",
-                border: "1px solid rgba(255,255,255,0.10)",
-                borderRadius: 16,
-                padding: "20px",
-              }}
-            >
-              <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Model Settings</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {[
-                  { label: "Confidence threshold", value: "0.45" },
-                  { label: "Model",                value: "YOLOv8-hull-v2" },
-                  { label: "Detection types",       value: "All anomalies" },
-                ].map((r) => (
-                  <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)" }}>{r.label}</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: "#a78bfa" }}>{r.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Run button */}
+            {/* Run button — full width, professional white toggle like dashboard CTA */}
             <button
+              type="button"
               onClick={runInspection}
-              disabled={stage !== "selected"}
+              disabled={!canRun}
+              onMouseEnter={(e) => {
+                if (!canRun) return;
+                e.currentTarget.style.background = "rgba(15,23,42,0.98)";
+                e.currentTarget.style.color = "#f9fafb";
+              }}
+              onMouseLeave={(e) => {
+                if (!canRun) return;
+                e.currentTarget.style.background = "#f9fafb";
+                e.currentTarget.style.color = "#020617";
+              }}
               style={{
-                width: "100%", fontSize: 14, fontWeight: 700, color: "#fff",
-                background: stage === "selected"
-                  ? "linear-gradient(135deg, #7c3aed, #3b82f6)"
-                  : "rgba(255,255,255,0.08)",
-                border: "none", borderRadius: 12, padding: "14px",
-                cursor: stage === "selected" ? "pointer" : "not-allowed",
-                opacity: stage === "selected" ? 1 : 0.5,
-                boxShadow: stage === "selected" ? "0 4px 24px rgba(124,58,237,0.45)" : "none",
-                transition: "all 0.2s",
+                all: "unset",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                width: "100%",
+                boxSizing: "border-box",
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: "0.02em",
+                color: canRun ? "#020617" : "rgba(148,163,184,0.65)",
+                background: canRun ? "#f9fafb" : "rgba(15,23,50,0.60)",
+                border: canRun
+                  ? "1px solid rgba(148,163,184,0.45)"
+                  : "1px solid rgba(148,163,184,0.18)",
+                borderRadius: 999,
+                padding: "11px 24px",
+                cursor: canRun ? "pointer" : "not-allowed",
+                opacity: canRun ? 1 : 0.7,
+                boxShadow: canRun
+                  ? "0 4px 22px rgba(15,23,42,0.75)"
+                  : "none",
+                transition: "all 0.18s ease",
+                flexShrink: 0,
               }}
             >
-              {stage === "selected" ? "Run Inspection →" : "Upload a file first"}
+              {canRun ? (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                  </svg>
+                  Run Inspection
+                </>
+              ) : (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  Upload a file first
+                </>
+              )}
             </button>
 
+          </div>
+
+
+          {/* ═══ COL 3 — Tips + Model Settings ═══ */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+            {/* spacer label to align with col1/col2 */}
+            <p style={{ ...STEP_LABEL, visibility: "hidden" }}>placeholder</p>
+
             {/* Tips */}
-            <div
-              style={{
-                background: "rgba(15,23,42,0.80)",
-                border: "1px solid rgba(148,163,184,0.45)",
-                borderRadius: 12,
-                padding: "14px 16px",
-              }}
-            >
-              <p style={{ fontSize: 11, fontWeight: 700, color: "rgba(196,181,253,0.80)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Tips</p>
-              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ ...CARD, flexShrink: 0 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 10 }}>
+                Tips
+              </p>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7 }}>
                 {[
-                  "Use clear, well-lit underwater footage for best results",
-                  "Keep the camera steady — motion blur reduces accuracy",
-                  "Hull-only footage; avoid fish or debris-heavy shots",
-                ].map((t) => (
-                  <li key={t} style={{ fontSize: 11, color: "rgba(186,230,255,0.50)", display: "flex", gap: 6 }}>
-                    <span style={{ color: "#7c3aed", flexShrink: 0 }}>›</span> {t}
+                  "Use clear, well‑lit underwater footage for best results.",
+                  "Keep the camera steady — motion blur reduces accuracy.",
+                  "Focus on the hull; avoid fish or debris‑heavy scenes.",
+                ].map((tip) => (
+                  <li key={tip} style={{ fontSize: 10, color: "rgba(186,230,255,0.78)", display: "flex", gap: 6, lineHeight: 1.5 }}>
+                    <span style={{ color: "#7c3aed", flexShrink: 0, fontWeight: 700, fontSize: 12 }}>›</span>
+                    {tip}
                   </li>
                 ))}
               </ul>
             </div>
+
+            {/* Step 3 label */}
+            <p style={STEP_LABEL}>Step 3 · Model configuration</p>
+
+            {/* Model Settings */}
+            <div style={{ ...CARD, flex: 1, minHeight: 0 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "rgba(226,232,240,0.96)", borderBottom: "1px solid rgba(129,140,248,0.15)", paddingBottom: 8 }}>
+                Model Settings
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {[
+                  { label: "Confidence threshold", value: "0.45" },
+                  { label: "Model", value: "YOLOv8‑hull‑v2" },
+                  { label: "Detection types", value: "All anomalies" },
+                ].map((row) => (
+                  <div
+                    key={row.label}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "7px 0",
+                      borderBottom: "1px solid rgba(129,140,248,0.08)",
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: "rgba(186,230,255,0.62)" }}>{row.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#a78bfa", background: "rgba(109,40,217,0.16)", borderRadius: 5, padding: "2px 7px" }}>
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </PageShell>
+      </div >
+
+      <style>{`
+        input, textarea { font-family: inherit !important; color: #fff !important; }
+        button { font-family: inherit; }
+      `}</style>
+    </PageShell >
   );
 }

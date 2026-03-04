@@ -35,9 +35,12 @@ export interface Inspection {
   status: InspectionStatus | string;
   created_at: string;
   file_name?: string | null;
+  vessel_name?: string | null;
   detected_classes?: string[] | null;
+  anomalies?: Anomaly[] | null;
   highest_confidence?: number | null;
   risk_level?: string | null;
+  risk_score?: number | null;
   inference_time?: number | null;
   precision?: number | null;
   recall?: number | null;

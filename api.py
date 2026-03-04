@@ -1,6 +1,6 @@
 """
 NautiCAI FastAPI Backend
-Runs YOLOv8 inference on uploaded images/videos and saves results to Supabase.
+Runs YOLOv8 inference on uploaded images/videos and stores results in Postgres (Neon).
 Start with: uvicorn api:app --reload --port 8000
 """
 
@@ -13,7 +13,7 @@ import base64
 import tempfile
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # ── Torch safe loading fix — MUST run before ultralytics import ──
@@ -25,17 +25,19 @@ def _safe_load(*args, **kw):
     return _orig_torch_load(*args, **kw)
 torch.load = _safe_load
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from ultralytics import YOLO
-from supabase import create_client
 from dotenv import load_dotenv
+import json
+import hashlib
+import secrets
 
-# Optional direct Postgres insert (enterprise contact form)
+# Optional direct Postgres access (Neon)
 try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
@@ -45,8 +47,6 @@ except Exception:
 
 # ── Config ──────────────────────────────────────────────
 load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 POSTGRES_DSN = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "best.pt")
@@ -98,15 +98,6 @@ app.add_middleware(
 print(f"Loading YOLO model from {MODEL_PATH} ...")
 model = YOLO(MODEL_PATH)
 print("Model loaded ✓")
-
-# ── Supabase client ───────────────────────────────────────
-try:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("Supabase connected ✓")
-except Exception as e:
-    print(f"Supabase connection warning: {e}")
-    supabase = None
-
 
 # ── Helper: get box colour ────────────────────────────────
 def get_color(class_name: str):
@@ -165,22 +156,6 @@ def img_to_b64(image_bgr: np.ndarray) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
 
 
-# ── Helper: upload file bytes to Supabase storage ─────────
-def upload_to_supabase(bucket: str, filename: str, data: bytes, content_type: str) -> str | None:
-    if supabase is None:
-        return None
-    try:
-        unique_name = f"{uuid.uuid4()}_{filename}"
-        supabase.storage.from_(bucket).upload(
-            unique_name, data,
-            file_options={"content-type": content_type}
-        )
-        return supabase.storage.from_(bucket).get_public_url(unique_name)
-    except Exception as e:
-        print(f"Supabase upload error: {e}")
-        return None
-
-
 # ── Contact form model & helpers ─────────────────────────────────────────────
 class ContactPayload(BaseModel):
     first_name: str
@@ -223,11 +198,223 @@ def insert_contact_postgres(payload: ContactPayload) -> bool:
             conn.close()
 
 
+class AuthPayload(BaseModel):
+    email: str
+    password: str
+
+
+def hash_password(password: str) -> tuple[str, str]:
+    salt = secrets.token_hex(16)
+    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return salt, digest
+
+
+def verify_password(password: str, salt: str, password_hash: str) -> bool:
+    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return secrets.compare_digest(digest, password_hash)
+
+
+def create_session(user_id: int) -> str:
+    if not POSTGRES_DSN or psycopg2 is None:
+        raise HTTPException(500, "Auth not configured")
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=7)
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO auth_sessions (user_id, token, created_at, expires_at)
+                VALUES (%s, %s, NOW(), %s)
+                """,
+                (user_id, token, expires_at),
+            )
+        conn.commit()
+        return token
+    except Exception as e:
+        print(f"Auth session insert error: {e}")
+        raise HTTPException(500, "Failed to create auth session")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_user_from_token(token: str) -> dict | None:
+    if not POSTGRES_DSN or psycopg2 is None:
+        return None
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, u.email
+                FROM auth_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token = %s
+                  AND (s.expires_at IS NULL OR s.expires_at > NOW())
+                """,
+                (token,),
+            )
+            row = cur.fetchone()
+        return row
+    except Exception as e:
+        print(f"Auth token lookup error: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def require_auth(authorization: str | None) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Missing Authorization header")
+    token = authorization.split(" ", 1)[1].strip()
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(401, "Invalid or expired auth token")
+    return user
+
+
+def insert_inspection_postgres(row: dict) -> bool:
+    """
+    Persist an inspection summary into Postgres (Neon).
+    Expects the `inspections` table to exist with matching columns.
+    """
+    if not POSTGRES_DSN or psycopg2 is None:
+        return False
+
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO inspections (
+                  inspection_id,
+                  file_name,
+                  detected_classes,
+                  highest_confidence,
+                  risk_level,
+                  inference_time,
+                  precision,
+                  recall,
+                  map50,
+                  map5095,
+                  image_url,
+                  annotated_image_url,
+                  status,
+                  created_at
+                )
+                VALUES (
+                  %(inspection_id)s,
+                  %(file_name)s,
+                  %(detected_classes)s,
+                  %(highest_confidence)s,
+                  %(risk_level)s,
+                  %(inference_time)s,
+                  %(precision)s,
+                  %(recall)s,
+                  %(map50)s,
+                  %(map5095)s,
+                  %(image_url)s,
+                  %(annotated_image_url)s,
+                  %(status)s,
+                  NOW()
+                )
+                """,
+                row,
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Postgres inspection insert error: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+# ══════════════════════════════════════════════════════════
+#  AUTH ENDPOINTS
+# ══════════════════════════════════════════════════════════
+@app.post("/auth/signup")
+async def auth_signup(payload: AuthPayload):
+    if not POSTGRES_DSN or psycopg2 is None:
+        raise HTTPException(500, "Auth not configured")
+
+    email = payload.email.strip().lower()
+    if not email or not payload.password:
+        raise HTTPException(400, "Email and password are required")
+
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            if cur.fetchone():
+                raise HTTPException(400, "User already exists")
+
+            salt, pw_hash = hash_password(payload.password)
+            cur.execute(
+                """
+                INSERT INTO users (email, password_salt, password_hash, created_at)
+                VALUES (%s, %s, %s, NOW())
+                RETURNING id, email
+                """,
+                (email, salt, pw_hash),
+            )
+            user = cur.fetchone()
+        conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+
+    token = create_session(user["id"])
+    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+
+
+@app.post("/auth/login")
+async def auth_login(payload: AuthPayload):
+    if not POSTGRES_DSN or psycopg2 is None:
+        raise HTTPException(500, "Auth not configured")
+
+    email = payload.email.strip().lower()
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, password_salt, password_hash
+                FROM users
+                WHERE email = %s
+                """,
+                (email,),
+            )
+            user = cur.fetchone()
+        if not user or not verify_password(
+            payload.password, user["password_salt"], user["password_hash"]
+        ):
+            raise HTTPException(401, "Invalid email or password")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    token = create_session(user["id"])
+    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+
+
 # ══════════════════════════════════════════════════════════
 #  ENDPOINT: POST /detect
 # ══════════════════════════════════════════════════════════
 @app.post("/detect")
-async def detect(file: UploadFile = File(...)):
+async def detect(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(None),
+):
     """
     Accept an image or video, run YOLOv8 inference, return detections.
     Response JSON:
@@ -237,6 +424,9 @@ async def detect(file: UploadFile = File(...)):
       inspection_id: str
       model_metrics: { precision, recall, map50, map5095 }
     """
+    # Require auth
+    require_auth(authorization)
+
     # Validate
     allowed = {"image/jpeg", "image/png", "image/jpg", "image/webp",
                "video/mp4", "video/quicktime", "video/avi"}
@@ -330,37 +520,27 @@ async def detect(file: UploadFile = File(...)):
 
     inspection_id = f"NCR-{datetime.now().strftime('%Y%m%d')}-{random.randint(1000,9999)}"
 
-    # ── Save to Supabase (non-blocking, best-effort) ──────
-    _, jpg_buf = cv2.imencode(".jpg", annotated_bgr)
-    annotated_url = upload_to_supabase(
-        "image_bucket", f"annotated_{inspection_id}.jpg",
-        jpg_buf.tobytes(), "image/jpeg"
-    )
-    original_url = upload_to_supabase(
-        "image_bucket", f"original_{inspection_id}.jpg",
-        raw_bytes, file.content_type or "image/jpeg"
-    )
-
-    if supabase is not None:
-        try:
-            class_names = list(set(d["class_name"] for d in detections))
-            supabase.table("inspections").insert({
-                "inspection_id":       inspection_id,
-                "file_name":           file.filename,
-                "detected_classes":    class_names,
-                "highest_confidence":  float(max_conf),
-                "risk_level":          risk,
-                "inference_time":      inference_ms / 1000,
-                "precision":           MODEL_METRICS["precision"],
-                "recall":              MODEL_METRICS["recall"],
-                "map50":               MODEL_METRICS["map50"],
-                "map5095":             MODEL_METRICS["map5095"],
-                "image_url":           original_url,
-                "annotated_image_url": annotated_url,
-                "status":              "completed",
-            }).execute()
-        except Exception as e:
-            print(f"Supabase DB insert error: {e}")
+    # ── Persist summary to Postgres (best-effort) ─────────
+    try:
+        class_names = list({d["class_name"] for d in detections})
+        row = {
+            "inspection_id":       inspection_id,
+            "file_name":           file.filename,
+            "detected_classes":    json.dumps(class_names),
+            "highest_confidence":  float(max_conf),
+            "risk_level":          risk,
+            "inference_time":      inference_ms / 1000,
+            "precision":           MODEL_METRICS["precision"],
+            "recall":              MODEL_METRICS["recall"],
+            "map50":               MODEL_METRICS["map50"],
+            "map5095":             MODEL_METRICS["map5095"],
+            "image_url":           None,
+            "annotated_image_url": None,
+            "status":              "completed",
+        }
+        insert_inspection_postgres(row)
+    except Exception as e:
+        print(f"Postgres inspection insert error: {e}")
 
     # ── Response ──────────────────────────────────────────
     return JSONResponse({
@@ -383,24 +563,86 @@ async def detect(file: UploadFile = File(...)):
 #  ENDPOINT: GET /inspections
 # ══════════════════════════════════════════════════════════
 @app.get("/inspections")
-async def get_inspections(limit: int = 20):
-    if supabase is None:
-        return JSONResponse({"inspections": [], "error": "Supabase not configured"})
+async def get_inspections(limit: int = 20, inspection_id: Optional[str] = None):
+    """
+    List inspections or fetch a specific inspection.
+    Returns JSON with an `inspections` array.
+    """
+    if not POSTGRES_DSN or psycopg2 is None:
+        return {"inspections": [], "error": "Postgres not configured"}
+
+    conn = None
     try:
-        resp = (supabase.table("inspections")
-                .select("*")
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute())
-        return JSONResponse({"inspections": resp.data or []})
+        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            if inspection_id:
+                cur.execute(
+                    """
+                    SELECT
+                      id,
+                      inspection_id,
+                      file_name,
+                      detected_classes,
+                      highest_confidence,
+                      risk_level,
+                      inference_time,
+                      precision,
+                      recall,
+                      map50,
+                      map5095,
+                      image_url,
+                      annotated_image_url,
+                      status,
+                      created_at
+                    FROM inspections
+                    WHERE inspection_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (inspection_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                      id,
+                      inspection_id,
+                      file_name,
+                      detected_classes,
+                      highest_confidence,
+                      risk_level,
+                      inference_time,
+                      precision,
+                      recall,
+                      map50,
+                      map5095,
+                      image_url,
+                      annotated_image_url,
+                      status,
+                      created_at
+                    FROM inspections
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            rows = cur.fetchall()
+        return {"inspections": rows}
     except Exception as e:
-        return JSONResponse({"inspections": [], "error": str(e)})
+        print(f"Postgres inspections query error: {e}")
+        return {"inspections": [], "error": str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 # ── Health check ──────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": MODEL_PATH, "supabase": supabase is not None}
+    return {
+        "status": "ok",
+        "model": MODEL_PATH,
+        "postgres": bool(POSTGRES_DSN),
+    }
 
 
 # ── Debug: verify loaded module and routes ───────────────────────────────────
@@ -416,31 +658,14 @@ async def debug_routes():
 @app.post("/contact")
 async def submit_contact(payload: ContactPayload):
     """
-    Save enterprise contact form data.
-    Writes to Supabase table and (optionally) to Postgres if POSTGRES_DSN is set.
+    Save enterprise contact form data into Postgres (Neon).
     """
-    supabase_ok = False
-    if supabase is not None:
-        try:
-            supabase.table("enterprise_contacts").insert({
-                "first_name": payload.first_name,
-                "last_name": payload.last_name,
-                "email": payload.email,
-                "company": payload.company,
-                "use_case": payload.use_case,
-                "message": payload.message,
-            }).execute()
-            supabase_ok = True
-        except Exception as e:
-            print(f"Supabase contact insert error: {e}")
-
     postgres_ok = insert_contact_postgres(payload)
 
-    if not supabase_ok and not postgres_ok:
+    if not postgres_ok:
         raise HTTPException(500, "Failed to save contact data")
 
     return {
         "status": "ok",
-        "saved_supabase": supabase_ok,
         "saved_postgres": postgres_ok,
     }

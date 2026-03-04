@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Navbar } from "@/components/Navbar";
 
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -44,6 +46,16 @@ const CSS = `
 `;
 
 export default function Home() {
+  const router = useRouter();
+
+  const handleStartInspection = () => {
+    if (typeof window !== "undefined") {
+      const token = window.localStorage.getItem("nauticai:token");
+      router.push(token ? "/inspect" : "/login");
+    } else {
+      router.push("/login");
+    }
+  };
   return (
     <>
       <style>{CSS}</style>
@@ -73,67 +85,8 @@ export default function Home() {
           }} />
         </div>
 
-        {/* ── NAVBAR ── */}
-        <header style={{
-          position: "relative", zIndex: 10,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "0 56px",
-          height: 68,
-          flexShrink: 0,
-          animation: "fade-in 0.6s ease both",
-        }}>
-          <a href="#" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}>
-              <Image src="/logo.png" alt="NautiCAI" width={34} height={34}
-                style={{ objectFit: "cover", width: "100%", height: "100%" }} />
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-0.01em" }}>
-              NautiCAI
-            </span>
-          </a>
-
-          <nav style={{
-            position: "absolute", left: "50%", transform: "translateX(-50%)",
-            display: "flex", gap: 36,
-          }}>
-            {[
-              { label: "Dashboard", href: "/dashboard" },
-              { label: "Inspect",   href: "/inspect"   },
-              { label: "Reports",   href: "/reports"   },
-              { label: "About",     href: "https://www.nauticai-ai.com/" },
-            ].map((l) => (
-              <Link key={l.href} href={l.href} className="nav-link" style={{
-                fontSize: 13, fontWeight: 600,
-                background: "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                textDecoration: "none",
-                letterSpacing: "-0.005em",
-                transition: "opacity 0.2s",
-              }}>{l.label}</Link>
-            ))}
-          </nav>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <Link href="/login" className="nav-link" style={{
-              fontSize: 13, fontWeight: 600,
-              background: "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              textDecoration: "none",
-              transition: "opacity 0.2s",
-            }}>Log In</Link>
-            <a href="mailto:contact@nauticai.com" style={{
-              fontSize: 13, fontWeight: 700, color: "#0d0422",
-              background: "#fff",
-              borderRadius: 999, padding: "8px 20px",
-              textDecoration: "none",
-              animation: "btn-pulse 3s ease-in-out infinite",
-            }}>
-              Talk to our team
-            </a>
-          </div>
-        </header>
+        {/* ── NAVBAR (shared component: shows Log In vs signed-in pill from localStorage) ── */}
+        <Navbar />
 
         {/* ── HERO ── */}
         <main style={{
@@ -143,22 +96,23 @@ export default function Home() {
           gridTemplateColumns: "1fr 1fr",
           alignItems: "center",
           padding: "0 56px",
+          paddingTop: 76,
           gap: 40,
         }}>
           <div>
-            <h1 style={{
-              fontSize: "clamp(2.6rem, 3.5vw, 4.1rem)",
-              fontWeight: 800,
-              lineHeight: 1.07,
-              letterSpacing: "-0.03em",
-              textShadow: "0 2px 24px rgba(0,0,0,0.35)",
-              animation: "fade-up 0.7s ease 0.1s both",
-            }}>
-              Spot Every<br />
-              Hull Defect –<br />
-              Before it Becomes<br />
-              <span style={{ color: "#1e1b4b" }}>
-                an Expensive Problem.
+            <h1
+              style={{
+                fontSize: "clamp(2.6rem, 3.5vw, 4.1rem)",
+                fontWeight: 800,
+                lineHeight: 1.07,
+                letterSpacing: "-0.03em",
+                textShadow: "0 2px 24px rgba(0,0,0,0.35)",
+                animation: "fade-up 0.7s ease 0.1s both",
+              }}
+            >
+              Underwater Hull Inspections,&nbsp;
+              <span style={{ color: "#1e1b4b", fontWeight: 900 }}>
+                Automated.
               </span>
             </h1>
 
@@ -181,7 +135,13 @@ export default function Home() {
               display: "flex", alignItems: "center", gap: 22,
               animation: "fade-up 0.7s ease 0.4s both",
             }}>
-              <Link href="/inspect" style={{
+              <Link
+                href="/inspect"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleStartInspection();
+                }}
+                style={{
                 display: "inline-flex", alignItems: "center", gap: 7,
                 fontSize: 13, fontWeight: 700, color: "#0d0422",
                 background: "#fff",
@@ -194,7 +154,7 @@ export default function Home() {
                   <path fillRule="evenodd" d="M6.22 3.22a.75.75 0 011.06 0l4.25 4.25a.75.75 0 010 1.06L7.28 12.78a.75.75 0 01-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                 </svg>
               </Link>
-              <Link className="cta-ghost" href="/dashboard" style={{
+              <Link className="cta-ghost" href="/learn" style={{
                 fontSize: 13, fontWeight: 500,
                 color: "rgba(186,230,255,0.72)",
                 textDecoration: "none", transition: "color 0.2s",

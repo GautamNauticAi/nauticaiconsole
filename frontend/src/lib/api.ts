@@ -3,7 +3,16 @@ import type { DetectResponse, Inspection, DashboardStats } from "@/types";
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init);
+  const headers = new Headers(init?.headers || undefined);
+
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("nauticai:token");
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  const res = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
   return (await res.json()) as T;
 }
@@ -90,6 +99,28 @@ export const api = {
     )}`;
   },
 };
+
+export async function authSignup(email: string, password: string) {
+  return req<{ token: string; user: { id: number; email: string } }>(
+    "/auth/signup",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    }
+  );
+}
+
+export async function authLogin(email: string, password: string) {
+  return req<{ token: string; user: { id: number; email: string } }>(
+    "/auth/login",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    }
+  );
+}
 
 /* ── Mock data for local dev (used when API is unavailable) ── */
 export const MOCK_INSPECTIONS: Inspection[] = [

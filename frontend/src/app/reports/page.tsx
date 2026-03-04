@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
 import { MOCK_INSPECTIONS, api } from "@/lib/api";
 import type { Severity } from "@/types";
@@ -22,9 +23,17 @@ function maxSeverity(anomalies: { severity: Severity }[]): Severity | null {
 }
 
 export default function ReportsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortBy, setSortBy] = useState<"date" | "risk">("date");
+  const [hoverNew, setHoverNew] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem("nauticai:token");
+    if (!token) router.replace("/login");
+  }, [router]);
 
   const inspections = MOCK_INSPECTIONS
     .filter((i) => {
@@ -35,7 +44,7 @@ export default function ReportsPage() {
     .sort((a, b) =>
       sortBy === "date"
         ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        : b.risk_score - a.risk_score
+        : (b.risk_score ?? 0) - (a.risk_score ?? 0)
     );
 
   return (
@@ -48,12 +57,27 @@ export default function ReportsPage() {
             <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 4 }}>Reports</h1>
             <p style={{ fontSize: 13, color: "rgba(186,230,255,0.55)" }}>Full inspection history — filter, sort and export</p>
           </div>
-          <Link href="/inspect" style={{
-            fontSize: 13, fontWeight: 700, color: "#fff",
-            background: "linear-gradient(135deg, #7c3aed, #3b82f6)",
-            borderRadius: 999, padding: "9px 22px", textDecoration: "none",
-            boxShadow: "0 2px 20px rgba(124,58,237,0.40)",
-          }}>
+          <Link
+            href="/inspect"
+            onMouseEnter={() => setHoverNew(true)}
+            onMouseLeave={() => setHoverNew(false)}
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: hoverNew ? "#f9fafb" : "#020617",
+              background: hoverNew ? "rgba(15,23,42,0.98)" : "#f9fafb",
+              borderRadius: 999,
+              padding: "9px 22px",
+              textDecoration: "none",
+              border: hoverNew
+                ? "1px solid rgba(148,163,184,0.55)"
+                : "1px solid rgba(148,163,184,0.25)",
+              boxShadow: hoverNew
+                ? "0 0 0 1px rgba(15,23,42,0.9)"
+                : "0 4px 20px rgba(15,23,42,0.65)",
+              transition: "all 0.16s ease",
+            }}
+          >
             + New Inspection
           </Link>
         </div>
@@ -134,7 +158,7 @@ export default function ReportsPage() {
                 </tr>
               )}
               {inspections.map((ins, i) => {
-                const ms = maxSeverity(ins.anomalies);
+                const ms = maxSeverity(ins.anomalies ?? []);
                 const msColor = ms ? severityColor[ms] : "#94a3b8";
                 return (
                   <tr key={ins.id} style={{
@@ -152,8 +176,8 @@ export default function ReportsPage() {
                       </span>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: ins.anomalies.length ? "#f59e0b" : "#10b981" }}>
-                        {ins.anomalies.length}
+                      <span style={{ fontSize: 13, fontWeight: 700, color: (ins.anomalies?.length ?? 0) ? "#f59e0b" : "#10b981" }}>
+                        {ins.anomalies?.length ?? 0}
                       </span>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
@@ -167,13 +191,36 @@ export default function ReportsPage() {
                     </td>
                     <td style={{ padding: "14px 20px" }}>
                       {ins.status === "completed" ? (
-                        <span style={{
-                          fontSize: 13, fontWeight: 700,
-                          color: ins.risk_score >= 8 ? "#dc2626" : ins.risk_score >= 5 ? "#f59e0b" : "#10b981",
-                        }}>
-                          {ins.risk_score.toFixed(1)}
-                        </span>
-                      ) : <span style={{ color: "rgba(186,230,255,0.30)", fontSize: 12 }}>—</span>}
+                        (() => {
+                          const anyIns = ins as any;
+                          const numericRisk =
+                            typeof anyIns.risk_score === "number"
+                              ? anyIns.risk_score
+                              : anyIns.risk_level === "HIGH" ||
+                                anyIns.risk_level === "CRITICAL"
+                              ? 8.5
+                              : anyIns.risk_level === "MEDIUM"
+                              ? 5.5
+                              : anyIns.risk_level === "LOW"
+                              ? 3.0
+                              : 1.0;
+                          const color =
+                            numericRisk >= 8 ? "#dc2626" : numericRisk >= 5 ? "#f59e0b" : "#10b981";
+                          return (
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color,
+                              }}
+                            >
+                              {numericRisk.toFixed(1)}
+                            </span>
+                          );
+                        })()
+                      ) : (
+                        <span style={{ color: "rgba(186,230,255,0.30)", fontSize: 12 }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: "14px 20px" }}>
                       <span style={{
@@ -185,19 +232,67 @@ export default function ReportsPage() {
                       }}>{ins.status}</span>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                         {ins.status === "completed" && (
                           <>
-                            <Link href={`/results/${ins.id}`} style={{
-                              fontSize: 11, fontWeight: 600, color: "#a78bfa",
-                              textDecoration: "none", padding: "4px 10px",
-                              border: "1px solid rgba(167,139,250,0.30)", borderRadius: 6,
-                            }}>View</Link>
-                            <a href={api.exportReportUrl(ins.id)} target="_blank" rel="noreferrer" style={{
-                              fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.55)",
-                              textDecoration: "none", padding: "4px 10px",
-                              border: "1px solid rgba(186,230,255,0.20)", borderRadius: 6,
-                            }}>PDF ↗</a>
+                            <Link
+                              href={`/results/${ins.id}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                minWidth: 72,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "#020617",
+                                textDecoration: "none",
+                                padding: "5px 12px",
+                                borderRadius: 999,
+                                border: "1px solid rgba(148,163,184,0.45)",
+                                background: "#f9fafb",
+                                boxShadow: "0 4px 18px rgba(15,23,42,0.70)",
+                                transition: "all 0.16s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(15,23,42,0.98)";
+                                e.currentTarget.style.color = "#f9fafb";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#f9fafb";
+                                e.currentTarget.style.color = "#020617";
+                              }}
+                            >
+                              View
+                            </Link>
+                            <a
+                              href={api.exportReportUrl(ins.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                minWidth: 72,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "#e5e7eb",
+                                textDecoration: "none",
+                                padding: "5px 12px",
+                                borderRadius: 999,
+                                border: "1px solid rgba(148,163,184,0.45)",
+                                background: "rgba(15,23,42,0.96)",
+                                boxShadow: "0 3px 16px rgba(15,23,42,0.75)",
+                                transition: "opacity 0.16s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = "0.9";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = "1";
+                              }}
+                            >
+                              PDF ↗
+                            </a>
                           </>
                         )}
                       </div>

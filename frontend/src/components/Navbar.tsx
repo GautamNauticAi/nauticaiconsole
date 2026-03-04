@@ -2,8 +2,32 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export function Navbar() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem("nauticai:token");
+    const email = window.localStorage.getItem("nauticai:userEmail");
+    setAuthed(!!token);
+    setUserEmail(email);
+  }, []);
+
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("nauticai:token");
+      window.localStorage.removeItem("nauticai:userEmail");
+    }
+    setAuthed(false);
+    setUserEmail(null);
+    router.push("/login");
+  };
+
   return (
     <header
       style={{
@@ -120,23 +144,82 @@ export function Navbar() {
         )}
       </nav>
 
-      {/* Right actions — login + contact */}
+      {/* Right actions — auth + contact */}
       <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-        <Link
-          href="/login"
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            background:
-              "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            textDecoration: "none",
-            transition: "opacity 0.2s",
-          }}
-        >
-          Log In
-        </Link>
+        {authed ? (
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "6px 12px",
+                borderRadius: 999,
+                background: "rgba(15,23,42,0.75)",
+                border: "1px solid rgba(148,163,184,0.55)",
+              }}
+            >
+              <span
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "999px",
+                  background:
+                    "linear-gradient(135deg, rgba(124,58,237,0.9), rgba(59,130,246,0.9))",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                {(userEmail ?? "N")[0]?.toUpperCase()}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "rgba(226,238,255,0.85)",
+                  maxWidth: 140,
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                }}
+              >
+                {userEmail ?? "Signed in"}
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "rgba(248,250,252,0.88)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Log out
+              </button>
+            </div>
+          </>
+        ) : (
+          <Link
+            href="/login"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              background:
+                "linear-gradient(160deg, #ffffff 0%, #e2e8f0 50%, #94a3b8 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              textDecoration: "none",
+              transition: "opacity 0.2s",
+            }}
+          >
+            Log In
+          </Link>
+        )}
         <a
           href="mailto:contact@nauticai.com"
           style={{

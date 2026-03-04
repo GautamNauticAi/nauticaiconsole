@@ -146,6 +146,29 @@ export default function ResultsPage() {
   const annotatedSrc =
     liveDetect?.annotated_image || inspection?.annotated_image_url || null;
 
+  const anomalies = inspection?.anomalies ?? [];
+  const detections = liveDetect?.detections ?? [];
+
+  const effectiveRiskScore = (() => {
+    if (typeof inspection?.risk_score === "number") {
+      return inspection.risk_score;
+    }
+    const level = liveDetect?.summary.risk_level;
+    if (!level) return 0;
+    switch (level) {
+      case "HIGH":
+      case "CRITICAL":
+        return 8.5;
+      case "MEDIUM":
+        return 5.5;
+      case "LOW":
+        return 3.0;
+      case "SAFE":
+      default:
+        return 1.0;
+    }
+  })();
+
   return (
     <PageShell>
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 48px" }}>
@@ -172,13 +195,25 @@ export default function ResultsPage() {
             )}
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <a href={api.exportReportUrl(inspection.id)} target="_blank" rel="noreferrer" style={{
-              fontSize: 13, fontWeight: 600, color: "#a78bfa",
-              background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.35)",
-              borderRadius: 8, padding: "8px 18px", textDecoration: "none",
-            }}>
-              Export PDF ↗
-            </a>
+            {id && (
+              <a
+                href={api.exportReportUrl(String(id))}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#a78bfa",
+                  background: "rgba(124,58,237,0.15)",
+                  border: "1px solid rgba(124,58,237,0.35)",
+                  borderRadius: 8,
+                  padding: "8px 18px",
+                  textDecoration: "none",
+                }}
+              >
+                Export PDF ↗
+              </a>
+            )}
             <Link href="/inspect" style={{
               fontSize: 13, fontWeight: 700, color: "#fff",
               background: "linear-gradient(135deg, #7c3aed, #3b82f6)",
@@ -296,36 +331,53 @@ export default function ResultsPage() {
                       }}
                     />
                   )}
-                  {/* Overlay bounding boxes */}
-                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
-                    {inspection.anomalies.map((a) => {
-                      const c = severityColor[a.severity];
-                      return (
-                        <g key={a.id}>
-                          <rect
-                            x={`${(a.bbox.x1 / 800) * 100}%`}
-                            y={`${(a.bbox.y1 / 500) * 100}%`}
-                            width={`${((a.bbox.x2 - a.bbox.x1) / 800) * 100}%`}
-                            height={`${((a.bbox.y2 - a.bbox.y1) / 500) * 100}%`}
-                            fill="none" stroke={c} strokeWidth="2"
-                          />
-                          <rect
-                            x={`${(a.bbox.x1 / 800) * 100}%`}
-                            y={`calc(${(a.bbox.y1 / 500) * 100}% - 18px)`}
-                            width="96" height="16"
-                            fill={c} rx="3"
-                          />
-                          <text
-                            x={`calc(${(a.bbox.x1 / 800) * 100}% + 4px)`}
-                            y={`calc(${(a.bbox.y1 / 500) * 100}% - 5px)`}
-                            fill="#fff" fontSize="9" fontWeight="700" fontFamily="monospace"
-                          >
-                            {a.label} {(a.confidence * 100).toFixed(0)}%
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
+                  {/* Overlay bounding boxes when structured anomalies are available */}
+                  {anomalies.length > 0 && (
+                    <svg
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {anomalies.map((a) => {
+                        const c = severityColor[a.severity];
+                        return (
+                          <g key={a.id}>
+                            <rect
+                              x={`${(a.bbox.x1 / 800) * 100}%`}
+                              y={`${(a.bbox.y1 / 500) * 100}%`}
+                              width={`${((a.bbox.x2 - a.bbox.x1) / 800) * 100}%`}
+                              height={`${((a.bbox.y2 - a.bbox.y1) / 500) * 100}%`}
+                              fill="none"
+                              stroke={c}
+                              strokeWidth="2"
+                            />
+                            <rect
+                              x={`${(a.bbox.x1 / 800) * 100}%`}
+                              y={`calc(${(a.bbox.y1 / 500) * 100}% - 18px)`}
+                              width="96"
+                              height="16"
+                              fill={c}
+                              rx="3"
+                            />
+                            <text
+                              x={`calc(${(a.bbox.x1 / 800) * 100}% + 4px)`}
+                              y={`calc(${(a.bbox.y1 / 500) * 100}% - 5px)`}
+                              fill="#fff"
+                              fontSize="9"
+                              fontWeight="700"
+                              fontFamily="monospace"
+                            >
+                              {a.label} {(a.confidence * 100).toFixed(0)}%
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  )}
                 </div>
               ) : (
                 <div
@@ -354,29 +406,124 @@ export default function ResultsPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
             {/* Risk gauge */}
-            <div style={{
-              background: "rgba(5,5,20,0.80)", border: "1px solid rgba(148,163,184,0.45)",
-              borderRadius: 16, padding: "20px",
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(186,230,255,0.50)", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 8 }}>Risk Score</span>
-              <RiskGauge score={inspection.risk_score} />
+            <div
+              style={{
+                background: "rgba(5,5,20,0.80)",
+                border: "1px solid rgba(148,163,184,0.45)",
+                borderRadius: 16,
+                padding: "20px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "rgba(186,230,255,0.50)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.09em",
+                  marginBottom: 8,
+                }}
+              >
+                Risk Score
+              </span>
+              {(liveDetect || inspection) ? (
+                <RiskGauge score={effectiveRiskScore} />
+              ) : (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(186,230,255,0.45)",
+                  }}
+                >
+                  Waiting for inspection details…
+                </span>
+              )}
             </div>
 
             {/* Anomaly list */}
-            <div style={{
-              background: "rgba(5,5,20,0.80)", border: "1px solid rgba(148,163,184,0.45)",
-              borderRadius: 16, padding: "16px 18px", flex: 1,
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 700, display: "block", marginBottom: 14 }}>Detected Anomalies</span>
-              {inspection.anomalies.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "24px 0" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                  <p style={{ fontSize: 13, color: "rgba(186,230,255,0.55)" }}>No anomalies detected</p>
+            <div
+              style={{
+                background: "rgba(5,5,20,0.80)",
+                border: "1px solid rgba(148,163,184,0.45)",
+                borderRadius: 16,
+                padding: "16px 18px",
+                flex: 1,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: "block",
+                  marginBottom: 14,
+                }}
+              >
+                Detected Anomalies
+              </span>
+
+              {anomalies.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {anomalies.map((a) => (
+                    <AnomalyCard key={a.id} a={a} />
+                  ))}
+                </div>
+              ) : detections.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  {detections.map((d, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: "rgba(15,23,42,0.85)",
+                        border: "1px solid rgba(148,163,184,0.45)",
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{ color: "rgba(226,238,255,0.9)" }}>
+                        {d.class_name}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "monospace",
+                          color: "rgba(186,230,255,0.8)",
+                        }}
+                      >
+                        {(d.confidence * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {inspection.anomalies.map((a) => <AnomalyCard key={a.id} a={a} />)}
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "rgba(186,230,255,0.55)",
+                    }}
+                  >
+                    No anomalies detected
+                  </p>
                 </div>
               )}
             </div>

@@ -4,21 +4,27 @@ import Image from "next/image";
 import { Navbar } from "./Navbar";
 import { ReactNode } from "react";
 
-export function PageShell({ children }: { children: ReactNode }) {
+export function PageShell({
+  children,
+  backgroundSrc,
+}: {
+  children: ReactNode;
+  backgroundSrc?: string;
+}) {
+  const bg = backgroundSrc ?? "/bg3.avif";
   return (
     <div
       style={{
         minHeight: "100vh",
         position: "relative",
-        overflow: "hidden",
+        /* removed overflow:hidden — it was clipping page content */
         fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
         color: "#fff",
       }}
     >
-      {/* Shared background image for all app pages */}
       <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
         <Image
-          src="/background.png"
+          src={bg}
           alt=""
           fill
           priority

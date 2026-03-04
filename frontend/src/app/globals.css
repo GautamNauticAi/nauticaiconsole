@@ -1,25 +1,42 @@
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
-@import "tailwindcss";
+
+/* Tailwind v4 — import utilities only, skip the preflight CSS reset.
+   The preflight was overriding our inline styles on inputs, buttons,
+   and textareas, making style changes appear to have no effect. */
+@import "tailwindcss/utilities";
 
 :root {
   --background: #050012;
   --foreground: #ffffff;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 html {
   scroll-behavior: smooth;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
+  margin: 0;
   background-color: var(--background);
   color: var(--foreground);
   font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Ensure inputs/textareas/buttons inherit our font */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
