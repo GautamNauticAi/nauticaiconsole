@@ -129,7 +129,6 @@ export const MOCK_INSPECTIONS: Inspection[] = [
     inspection_id: "insp-001",
     status: "completed",
     created_at: "2026-03-02T09:14:00Z",
-    file_name: "hull_port_side.jpg",
     detected_classes: ["corrosion", "marine growth", "hull debris"],
     file_name: "hull_port_side.jpg",
     highest_confidence: 0.94,

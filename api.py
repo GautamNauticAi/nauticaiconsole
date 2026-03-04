@@ -94,10 +94,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Load model once at startup ────────────────────────────
-print(f"Loading YOLO model from {MODEL_PATH} ...")
-model = YOLO(MODEL_PATH)
-print("Model loaded ✓")
+# ── Lazy-load model (so Cloud Run startup probe passes before model loads) ──
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        print(f"Loading YOLO model from {MODEL_PATH} ...")
+        _model = YOLO(MODEL_PATH)
+        print("Model loaded ✓")
+    return _model
 
 # ── Helper: get box colour ────────────────────────────────
 def get_color(class_name: str):
@@ -447,7 +453,7 @@ async def detect(
         tmp_path = tmp.name
 
     try:
-        results = model.predict(
+        results = get_model().predict(
             source=tmp_path,
             conf=0.25,
             iou=0.45,

@@ -1,6 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import { PageShell } from "@/components/PageShell";
+
+const LEARN_IMAGES = {
+  step1: "/step1-upload.png",
+  step2: "/step2-pipeline.svg",
+  step3Dashboard: "/step3-dashboard.png",
+  step3Reports: "/step3-reports.png",
+};
 
 export default function LearnPage() {
   return (
@@ -114,48 +122,47 @@ export default function LearnPage() {
             </ul>
           </div>
 
-          {/* Placeholder for upload console screenshot */}
+          {/* Step 1 image: Detection Console upload */}
           <div
             style={{
               borderRadius: 18,
-              border: "1px dashed rgba(148,163,184,0.6)",
+              border: "1px solid rgba(148,163,184,0.45)",
               background: "rgba(15,23,42,0.90)",
-              padding: 14,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-              minHeight: 190,
+              overflow: "hidden",
+              minHeight: 200,
             }}
           >
-            <div
-              style={{
-                height: 140,
-                borderRadius: 14,
-                background:
-                  "repeating-linear-gradient(135deg, rgba(30,64,175,0.25), rgba(30,64,175,0.25) 2px, transparent 2px, transparent 6px)",
-                border: "1px solid rgba(148,163,184,0.55)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "rgba(191,219,254,0.85)",
-                fontSize: 12,
-                textAlign: "center",
-                padding: 10,
-              }}
-            >
-              Screenshot placeholder: Detection Console upload panel
-              <br />
-              (insert hero screenshot here)
+            <div style={{ position: "relative", width: "100%", aspectRatio: "16/10" }}>
+              <Image
+                src={LEARN_IMAGES.step1}
+                alt="Detection Console — upload hull footage"
+                fill
+                sizes="(max-width: 640px) 100vw, 50vw"
+                style={{ objectFit: "cover" }}
+                unoptimized
+                onError={(e) => {
+                  const t = e.target as HTMLImageElement;
+                  t.style.display = "none";
+                  if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = "flex";
+                }}
+              />
+              <div
+                style={{
+                  display: "none",
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(15,23,42,0.95)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "rgba(191,219,254,0.85)",
+                  fontSize: 12,
+                  textAlign: "center",
+                  padding: 16,
+                }}
+              >
+                Add <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>step1-upload.jpg</code> in <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>public/learn/</code>
+              </div>
             </div>
-            <p
-              style={{
-                marginTop: 8,
-                fontSize: 11,
-                color: "rgba(191,219,254,0.75)",
-              }}
-            >
-              You can drop in a full‑width image of the `/inspect` page here later.
-            </p>
           </div>
         </section>
 
@@ -169,46 +176,49 @@ export default function LearnPage() {
             alignItems: "stretch",
           }}
         >
-          {/* Placeholder for model diagram */}
+          {/* Step 2 image: YOLOv8 pipeline (520×280 SVG — show full width, no crop) */}
           <div
             style={{
               borderRadius: 18,
-              border: "1px dashed rgba(30,64,175,0.7)",
-              background: "rgba(5,10,30,0.96)",
-              padding: 16,
+              border: "1px solid rgba(148,163,184,0.45)",
+              background: "rgba(15,23,42,0.90)",
+              overflow: "hidden",
               display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <div
-              style={{
-                height: 140,
-                borderRadius: 14,
-                background: "rgba(15,23,42,1)",
-                border: "1px solid rgba(55,65,81,0.9)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                color: "rgba(191,219,254,0.85)",
-                textAlign: "center",
-                padding: 10,
-              }}
-            >
-              Diagram placeholder: YOLOv8 pipeline + Neon database
-              <br />
-              (model box → detection results → `inspections` table)
+            <div style={{ position: "relative", width: "100%", aspectRatio: "52/28" }}>
+              <Image
+                src={LEARN_IMAGES.step2}
+                alt="YOLOv8 pipeline — model to inspections table"
+                fill
+                sizes="(max-width: 640px) 100vw, 45vw"
+                style={{ objectFit: "contain" }}
+                unoptimized
+                onError={(e) => {
+                  const t = e.target as HTMLImageElement;
+                  t.style.display = "none";
+                  if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = "flex";
+                }}
+              />
+              <div
+                style={{
+                  display: "none",
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(15,23,42,0.95)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "rgba(191,219,254,0.85)",
+                  fontSize: 12,
+                  textAlign: "center",
+                  padding: 16,
+                }}
+              >
+                Add <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>step2-pipeline.jpg</code> in <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>public/learn/</code>
+              </div>
             </div>
-            <p
-              style={{
-                marginTop: 8,
-                fontSize: 11,
-                color: "rgba(191,219,254,0.75)",
-              }}
-            >
-              Later you can paste a block diagram of your FastAPI + YOLOv8 + Neon stack.
-            </p>
           </div>
 
           <div
@@ -335,51 +345,93 @@ export default function LearnPage() {
             </ul>
           </div>
 
-          {/* Placeholder for dashboard / reports screenshots */}
+          {/* Step 3 images: Dashboard + Reports */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: 10,
+              gap: 12,
             }}
           >
             <div
               style={{
-                flex: 1,
-                borderRadius: 14,
-                border: "1px dashed rgba(30,64,175,0.7)",
-                background: "rgba(5,10,30,0.96)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                color: "rgba(191,219,254,0.85)",
-                textAlign: "center",
-                padding: 10,
+                borderRadius: 18,
+                border: "1px solid rgba(148,163,184,0.45)",
+                background: "rgba(15,23,42,0.90)",
+                overflow: "hidden",
+                position: "relative",
+                aspectRatio: "16/9",
               }}
             >
-              Screenshot placeholder:
-              <br />
-              Overview dashboard (top of `/dashboard`)
+              <Image
+                src={LEARN_IMAGES.step3Dashboard}
+                alt="Dashboard — overview and recent inspections"
+                fill
+                sizes="(max-width: 640px) 100vw, 45vw"
+                style={{ objectFit: "cover" }}
+                unoptimized
+                onError={(e) => {
+                  const t = e.target as HTMLImageElement;
+                  t.style.display = "none";
+                  if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = "flex";
+                }}
+              />
+              <div
+                style={{
+                  display: "none",
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(15,23,42,0.95)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "rgba(191,219,254,0.85)",
+                  fontSize: 12,
+                  textAlign: "center",
+                  padding: 12,
+                }}
+              >
+                Add <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>step3-dashboard.jpg</code> in <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>public/learn/</code>
+              </div>
             </div>
             <div
               style={{
-                flex: 1,
-                borderRadius: 14,
-                border: "1px dashed rgba(30,64,175,0.7)",
-                background: "rgba(5,10,30,0.96)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                color: "rgba(191,219,254,0.85)",
-                textAlign: "center",
-                padding: 10,
+                borderRadius: 18,
+                border: "1px solid rgba(148,163,184,0.45)",
+                background: "rgba(15,23,42,0.90)",
+                overflow: "hidden",
+                position: "relative",
+                aspectRatio: "16/9",
               }}
             >
-              Screenshot placeholder:
-              <br />
-              Reports table (`/reports`) with export link
+              <Image
+                src={LEARN_IMAGES.step3Reports}
+                alt="Reports — inspection list and export"
+                fill
+                sizes="(max-width: 640px) 100vw, 45vw"
+                style={{ objectFit: "cover" }}
+                unoptimized
+                onError={(e) => {
+                  const t = e.target as HTMLImageElement;
+                  t.style.display = "none";
+                  if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = "flex";
+                }}
+              />
+              <div
+                style={{
+                  display: "none",
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(15,23,42,0.95)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "rgba(191,219,254,0.85)",
+                  fontSize: 12,
+                  textAlign: "center",
+                  padding: 12,
+                }}
+              >
+                Add <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>step3-reports.jpg</code> in <code style={{ background: "rgba(30,64,175,0.3)", padding: "2px 6px", borderRadius: 4 }}>public/learn/</code>
+              </div>
             </div>
           </div>
         </section>
