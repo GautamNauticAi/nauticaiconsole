@@ -30,6 +30,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+import jwt as pyjwt
+import httpx
 
 from ultralytics import YOLO
 from dotenv import load_dotenv
@@ -48,6 +50,9 @@ except Exception:
 # ── Config ──────────────────────────────────────────────
 load_dotenv()
 POSTGRES_DSN = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+RESET_SECRET = os.getenv("RESET_SECRET") or os.getenv("JWT_SECRET") or "change-me-in-production"
+FRONTEND_URL = os.getenv("FRONTEND_URL") or "https://nauticai-frontend.vercel.app"
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "best.pt")
 
@@ -87,11 +92,20 @@ DEFAULT_COLOR_BGR = (0, 200, 176)
 # ── App setup ────────────────────────────────────────────
 app = FastAPI(title="NautiCAI Detection API", version="1.0")
 
+# CORS: production origin + any localhost in dev (so both prod and dev work)
+_app_origins = [
+    "https://nauticai-frontend.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_app_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_headers=["*", "Authorization", "Content-Type"],
+    expose_headers=["*"],
 )
 
 # ── Lazy-load model (so Cloud Run startup probe passes before model loads) ──
@@ -209,6 +223,15 @@ class AuthPayload(BaseModel):
     password: str
 
 
+class ForgotPayload(BaseModel):
+    email: str
+
+
+class ResetPayload(BaseModel):
+    token: str
+    new_password: str
+
+
 def hash_password(password: str) -> tuple[str, str]:
     salt = secrets.token_hex(16)
     digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
@@ -284,6 +307,49 @@ def require_auth(authorization: str | None) -> dict:
     return user
 
 
+def create_reset_token(user_id: int) -> str:
+    return pyjwt.encode(
+        {"sub": user_id, "exp": datetime.utcnow() + timedelta(hours=1), "type": "password_reset"},
+        RESET_SECRET,
+        algorithm="HS256",
+    )
+
+
+def verify_reset_token(token: str) -> int | None:
+    try:
+        payload = pyjwt.decode(token, RESET_SECRET, algorithms=["HS256"])
+        if payload.get("type") != "password_reset":
+            return None
+        return int(payload.get("sub", 0))
+    except Exception:
+        return None
+
+
+def send_brevo_email(to_email: str, subject: str, html_content: str) -> bool:
+    if not BREVO_API_KEY:
+        print("BREVO_API_KEY not set; skipping email send")
+        return False
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json"},
+                json={
+                    "sender": {"email": "noreply@nauticai.com", "name": "NautiCAI"},
+                    "to": [{"email": to_email}],
+                    "subject": subject,
+                    "htmlContent": html_content,
+                },
+            )
+            if r.status_code not in (200, 201):
+                print(f"Brevo send error: {r.status_code} {r.text}")
+                return False
+        return True
+    except Exception as e:
+        print(f"Brevo send exception: {e}")
+        return False
+
+
 def insert_inspection_postgres(row: dict) -> bool:
     """
     Persist an inspection summary into Postgres (Neon).
@@ -348,69 +414,159 @@ def insert_inspection_postgres(row: dict) -> bool:
 # ══════════════════════════════════════════════════════════
 @app.post("/auth/signup")
 async def auth_signup(payload: AuthPayload):
-    if not POSTGRES_DSN or psycopg2 is None:
-        raise HTTPException(500, "Auth not configured")
-
-    email = payload.email.strip().lower()
-    if not email or not payload.password:
-        raise HTTPException(400, "Email and password are required")
-
-    conn = None
     try:
-        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
-            if cur.fetchone():
-                raise HTTPException(400, "User already exists")
+        if not POSTGRES_DSN or psycopg2 is None:
+            raise HTTPException(500, "Auth not configured")
 
-            salt, pw_hash = hash_password(payload.password)
-            cur.execute(
-                """
-                INSERT INTO users (email, password_salt, password_hash, created_at)
-                VALUES (%s, %s, %s, NOW())
-                RETURNING id, email
-                """,
-                (email, salt, pw_hash),
-            )
-            user = cur.fetchone()
-        conn.commit()
-    finally:
-        if conn is not None:
-            conn.close()
+        email = (payload.email or "").strip().lower()
+        if not email or not (payload.password or ""):
+            raise HTTPException(400, "Email and password are required")
 
-    token = create_session(user["id"])
-    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+        conn = None
+        try:
+            conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+                if cur.fetchone():
+                    raise HTTPException(400, "User already exists")
+
+                salt, pw_hash = hash_password(payload.password)
+                cur.execute(
+                    """
+                    INSERT INTO users (email, password_salt, password_hash, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                    RETURNING id, email
+                    """,
+                    (email, salt, pw_hash),
+                )
+                user = cur.fetchone()
+            conn.commit()
+        finally:
+            if conn is not None:
+                conn.close()
+
+        token = create_session(user["id"])
+        return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Auth signup error: {e}")
+        raise HTTPException(500, "Sign up failed. Please try again.")
 
 
 @app.post("/auth/login")
 async def auth_login(payload: AuthPayload):
-    if not POSTGRES_DSN or psycopg2 is None:
-        raise HTTPException(500, "Auth not configured")
+    try:
+        if not POSTGRES_DSN or psycopg2 is None:
+            raise HTTPException(500, "Auth not configured")
 
-    email = payload.email.strip().lower()
+        email = (payload.email or "").strip().lower()
+        if not email or not (payload.password or ""):
+            raise HTTPException(400, "Email and password are required")
+
+        conn = None
+        user = None
+        try:
+            conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, email, password_salt, password_hash
+                    FROM users
+                    WHERE email = %s
+                    """,
+                    (email,),
+                )
+                user = cur.fetchone()
+            if not user or not verify_password(
+                payload.password, user["password_salt"], user["password_hash"]
+            ):
+                raise HTTPException(401, "Invalid email or password")
+        finally:
+            if conn is not None:
+                conn.close()
+
+        token = create_session(user["id"])
+        return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Auth login error: {e}")
+        raise HTTPException(500, "Sign in failed. Please try again.")
+
+
+@app.post("/auth/forgot-password")
+async def auth_forgot_password(payload: ForgotPayload):
+    """Send password reset email via Brevo. Always returns 200 to avoid email enumeration."""
+    email = (payload.email or "").strip().lower()
+    if not email:
+        return {"ok": True}
+
+    if not POSTGRES_DSN or psycopg2 is None:
+        return {"ok": True}
+
     conn = None
+    user_id = None
     try:
         conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, email, password_salt, password_hash
-                FROM users
-                WHERE email = %s
-                """,
-                (email,),
-            )
-            user = cur.fetchone()
-        if not user or not verify_password(
-            payload.password, user["password_salt"], user["password_hash"]
-        ):
-            raise HTTPException(401, "Invalid email or password")
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+            if row:
+                user_id = row["id"]
     finally:
         if conn is not None:
             conn.close()
 
-    token = create_session(user["id"])
-    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+    if user_id and BREVO_API_KEY:
+        reset_token = create_reset_token(user_id)
+        reset_url = f"{FRONTEND_URL.rstrip('/')}/reset-password?token={reset_token}"
+        html = f"""
+        <p>You requested a password reset for NautiCAI.</p>
+        <p><a href="{reset_url}" style="color:#7c3aed;">Reset your password</a></p>
+        <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+        <p>— NautiCAI</p>
+        """
+        send_brevo_email(email, "Reset your NautiCAI password", html)
+
+    return {"ok": True}
+
+
+@app.post("/auth/reset-password")
+async def auth_reset_password(payload: ResetPayload):
+    """Reset password using token from email link."""
+    if not POSTGRES_DSN or psycopg2 is None:
+        raise HTTPException(500, "Auth not configured")
+
+    token = (payload.token or "").strip()
+    new_password = (payload.new_password or "").strip()
+    if not token or not new_password:
+        raise HTTPException(400, "Token and new password are required")
+    if len(new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    user_id = verify_reset_token(token)
+    if not user_id:
+        raise HTTPException(400, "Invalid or expired reset link")
+
+    salt, pw_hash = hash_password(new_password)
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN)
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET password_salt = %s, password_hash = %s WHERE id = %s",
+                (salt, pw_hash, user_id),
+            )
+        conn.commit()
+    except Exception as e:
+        print(f"Reset password error: {e}")
+        raise HTTPException(500, "Failed to update password")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {"ok": True}
 
 
 # ══════════════════════════════════════════════════════════

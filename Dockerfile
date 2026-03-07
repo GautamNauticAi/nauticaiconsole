@@ -11,7 +11,7 @@ WORKDIR /app
 COPY requirements_api.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend source (model weights, api.py, etc.)
+# Required at runtime: api.py, best.pt (model). Build: requirements_api.txt.
 COPY . .
 
 ENV PYTHONUNBUFFERED=1

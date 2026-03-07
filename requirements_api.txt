@@ -6,3 +6,5 @@ python-multipart
 python-dotenv
 numpy
 psycopg2-binary
+PyJWT
+httpx

@@ -1,0 +1,30 @@
+# Cloud Build context: exclude unneeded files.
+# REQUIRED in image (do not add patterns that exclude these):
+#   api.py, best.pt, requirements_api.txt, Dockerfile
+.git/
+.gitignore
+node_modules/
+.next/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+# Frontend and static assets (not needed in backend image)
+frontend/
+css/
+js/
+*.html
+image.png
+nauticai_api.py
+requirements.txt
+best (2).pt
+# Do NOT exclude: api.py, best.pt, requirements_api.txt

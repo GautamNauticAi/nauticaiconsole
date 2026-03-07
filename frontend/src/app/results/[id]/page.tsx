@@ -196,10 +196,12 @@ export default function ResultsPage() {
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             {id && (
-              <a
-                href={api.exportReportUrl(String(id))}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => {
+                  const ins = inspection ?? (liveDetect ? api.inspectionFromDetectResponse(liveDetect) : null);
+                  if (ins) api.exportReportPdf(ins, liveDetect?.annotated_image ?? undefined);
+                }}
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
@@ -208,11 +210,11 @@ export default function ResultsPage() {
                   border: "1px solid rgba(124,58,237,0.35)",
                   borderRadius: 8,
                   padding: "8px 18px",
-                  textDecoration: "none",
+                  cursor: "pointer",
                 }}
               >
-                Export PDF ↗
-              </a>
+                Download PDF
+              </button>
             )}
             <Link href="/inspect" style={{
               fontSize: 13, fontWeight: 700, color: "#fff",

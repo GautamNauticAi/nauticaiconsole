@@ -1,10 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { authLogin, authSignup } from "@/lib/api";
+import { authLogin, authSignup, authForgotPassword } from "@/lib/api";
+
+type PasswordStrength = "weak" | "fair" | "strong" | null;
+
+function getPasswordStrength(pw: string): PasswordStrength {
+  if (!pw) return null;
+  const hasLower = /[a-z]/.test(pw);
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasNumber = /\d/.test(pw);
+  const hasSpecial = /[^A-Za-z0-9]/.test(pw);
+  const len = pw.length;
+  let score = 0;
+  if (len >= 8) score++;
+  if (len >= 12) score++;
+  if (hasLower && hasUpper) score++;
+  if (hasNumber) score++;
+  if (hasSpecial) score++;
+  if (score <= 2) return "weak";
+  if (score <= 4) return "fair";
+  return "strong";
+}
+
+const strengthColor: Record<NonNullable<PasswordStrength>, string> = {
+  weak: "#ef4444",
+  fair: "#f59e0b",
+  strong: "#10b981",
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,26 +39,77 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [mode, setMode] = useState<"login" | "signup">("login");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr("");
-    if (!email || !password) { setErr("Please fill in all fields."); return; }
-    setLoading(true);
-    try {
-      const fn = mode === "login" ? authLogin : authSignup;
-      const res = await fn(email, password);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("nauticai:token", res.token);
-        window.localStorage.setItem("nauticai:userEmail", res.user.email);
+  const strength = mode === "signup" ? getPasswordStrength(password) : null;
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setErr("");
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail || !password) {
+        setErr("Please fill in all fields.");
+        return;
       }
-      router.push("/dashboard");
-    } catch (error) {
-      setErr(error instanceof Error ? error.message : "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        setErr("Please enter a valid email address.");
+        return;
+      }
+      if (mode === "signup") {
+        if (password.length < 8) {
+          setErr("Password must be at least 8 characters.");
+          return;
+        }
+      }
+      setLoading(true);
+      try {
+        const fn = mode === "login" ? authLogin : authSignup;
+        const res = await fn(trimmedEmail, password);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("nauticai:token", res.token);
+          window.localStorage.setItem("nauticai:userEmail", res.user.email);
+        }
+        router.push("/dashboard");
+      } catch (error) {
+        setErr(error instanceof Error ? error.message : "Authentication failed");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email, password, mode, router]
+  );
+
+  const handleForgotSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setErr("");
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail) {
+        setErr("Enter your email address.");
+        return;
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        setErr("Please enter a valid email address.");
+        return;
+      }
+      setLoading(true);
+      try {
+        await authForgotPassword(trimmedEmail);
+        setForgotSent(true);
+        setErr("");
+      } catch (error) {
+        setErr(error instanceof Error ? error.message : "Failed to send reset link.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email]
+  );
 
   return (
     <div
@@ -356,7 +433,11 @@ export default function LoginPage() {
                 marginBottom: 6,
               }}
             >
-              {mode === "login" ? "Sign in" : "Create account"}
+              {showForgot
+                ? "Reset password"
+                : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
             </h1>
             <p
               style={{
@@ -365,11 +446,122 @@ export default function LoginPage() {
                 marginBottom: 24,
               }}
             >
-              {mode === "login"
-                ? "Access the hull inspection platform"
-                : "Create a manual account to access the platform"}
+              {showForgot
+                ? "Enter your email and we’ll send you a link to reset your password."
+                : mode === "login"
+                  ? "Access the hull inspection platform"
+                  : "Create a manual account to access the platform"}
             </p>
 
+            {forgotSent ? (
+              <div
+                style={{
+                  background: "rgba(16,185,129,0.12)",
+                  border: "1px solid rgba(16,185,129,0.35)",
+                  borderRadius: 12,
+                  padding: "16px 18px",
+                  marginBottom: 16,
+                }}
+              >
+                <p style={{ fontSize: 13, color: "#6ee7b7", margin: 0 }}>
+                  If an account exists for that email, we’ve sent a reset link. Check your inbox and spam folder.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowForgot(false); setForgotSent(false); }}
+                  style={{
+                    marginTop: 12,
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: "#a78bfa",
+                    fontWeight: 600,
+                    fontSize: 12,
+                  }}
+                >
+                  ← Back to sign in
+                </button>
+              </div>
+            ) : showForgot ? (
+              <form
+                onSubmit={handleForgotSubmit}
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                <div>
+                  <label
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "rgba(186,230,255,0.50)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      display: "block",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@nauticai.com"
+                    style={{
+                      width: "100%",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      color: "#fff",
+                      outline: "none",
+                      transition: "border-color 0.2s",
+                    }}
+                  />
+                </div>
+                {err && (
+                  <p style={{ fontSize: 12, color: "#ef4444", background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.30)", borderRadius: 8, padding: "8px 12px", margin: 0 }}>
+                    {err}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: loading ? "rgba(15,23,42,0.6)" : "#020617",
+                    background: loading ? "rgba(248,250,252,0.8)" : "#f9fafb",
+                    borderRadius: 999,
+                    padding: "11px 18px",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    opacity: loading ? 0.8 : 1,
+                    boxShadow: loading ? "none" : "0 4px 22px rgba(15,23,42,0.75)",
+                    transition: "all 0.18s ease",
+                    marginTop: 4,
+                  }}
+                >
+                  {loading ? "Sending…" : "Send reset link"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowForgot(false); setErr(""); }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: "rgba(186,230,255,0.6)",
+                    fontSize: 12,
+                  }}
+                >
+                  ← Back to sign in
+                </button>
+              </form>
+            ) : (
             <form
               onSubmit={handleSubmit}
               style={{ display: "flex", flexDirection: "column", gap: 14 }}
@@ -393,6 +585,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@nauticai.com"
+                  autoComplete="email"
                   style={{
                     width: "100%",
                     fontSize: 13,
@@ -421,24 +614,73 @@ export default function LoginPage() {
                 >
                   Password
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  style={{
-                    width: "100%",
-                    fontSize: 13,
-                    fontFamily: "inherit",
-                    background: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    borderRadius: 10,
-                    padding: "10px 14px",
-                    color: "#fff",
-                    outline: "none",
-                    transition: "border-color 0.2s",
-                  }}
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete={mode === "login" ? "current-password" : "new-password"}
+                    style={{
+                      width: "100%",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      paddingRight: 44,
+                      color: "#fff",
+                      outline: "none",
+                      transition: "border-color 0.2s",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((s) => !s)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      padding: 4,
+                      cursor: "pointer",
+                      color: "rgba(186,230,255,0.5)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+                {strength && (
+                  <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 4,
+                        borderRadius: 999,
+                        background: "rgba(255,255,255,0.1)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: strength === "weak" ? "33%" : strength === "fair" ? "66%" : "100%",
+                          background: strengthColor[strength],
+                          borderRadius: 999,
+                          transition: "width 0.2s",
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: 10, color: strengthColor[strength], fontWeight: 600, textTransform: "capitalize" }}>
+                      {strength}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {err && (
@@ -450,10 +692,31 @@ export default function LoginPage() {
                     border: "1px solid rgba(239,68,68,0.30)",
                     borderRadius: 8,
                     padding: "8px 12px",
+                    margin: 0,
                   }}
                 >
                   {err}
                 </p>
+              )}
+
+              {mode === "login" && (
+                <div style={{ textAlign: "right", marginTop: -4 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgot(true); setErr(""); }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      color: "#a78bfa",
+                      fontSize: 12,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               )}
 
               <button
@@ -497,7 +760,9 @@ export default function LoginPage() {
                   : "Sign up →"}
               </button>
             </form>
+            )}
 
+            {!showForgot && !forgotSent && (
             <div
               style={{
                 marginTop: 22,
@@ -556,6 +821,7 @@ export default function LoginPage() {
                 </p>
               )}
             </div>
+            )}
 
             <div style={{ marginTop: 18, textAlign: "center" }}>
               <Link

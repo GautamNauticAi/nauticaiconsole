@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
-import { api, MOCK_INSPECTIONS, MOCK_STATS } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { Inspection, Severity, DashboardStats } from "@/types";
 
 const severityColor: Record<Severity, string> = {
@@ -20,14 +20,6 @@ const statusColor: Record<string, string> = {
   pending:    "#94a3b8",
   failed:     "#ef4444",
 };
-
-const FALLBACK_ANOMALY_BREAKDOWN = [
-  { label: "Corrosion",     count: 42, color: "#ef4444" },
-  { label: "Marine Growth", count: 31, color: "#7c3aed" },
-  { label: "Hull Debris",   count: 24, color: "#f59e0b" },
-  { label: "Dents & Damage",count: 14, color: "#3b82f6" },
-  { label: "Clean",         count: 7,  color: "#10b981" },
-];
 
 function StatCard({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent: string }) {
   return (
@@ -86,8 +78,13 @@ export default function Dashboard() {
         setInspections(list);
       } catch {
         if (!active) return;
-        setStats(MOCK_STATS);
-        setInspections(MOCK_INSPECTIONS);
+        setStats({
+          total_inspections: 0,
+          high_risk_count: 0,
+          total_anomalies: 0,
+          avg_risk_score: 0,
+        });
+        setInspections([]);
       } finally {
         if (active) setLoading(false);
       }
@@ -97,11 +94,15 @@ export default function Dashboard() {
     };
   }, []);
 
-  const effectiveStats = stats ?? MOCK_STATS;
-  const effectiveInspections: Inspection[] =
-    inspections ?? MOCK_INSPECTIONS;
+  const emptyStats: DashboardStats = {
+    total_inspections: 0,
+    high_risk_count: 0,
+    total_anomalies: 0,
+    avg_risk_score: 0,
+  };
+  const effectiveStats = stats ?? emptyStats;
+  const effectiveInspections: Inspection[] = inspections ?? [];
 
-  // Derive anomaly breakdown from inspection data (fallback to static if empty)
   const breakdownBase = [
     { key: "corrosion", label: "Corrosion", color: "#ef4444" },
     { key: "marine", label: "Marine Growth", color: "#7c3aed" },
@@ -132,8 +133,7 @@ export default function Dashboard() {
     return { label: row.label, color: row.color, count };
   });
 
-  const hasData = computedBreakdown.some((b) => b.count > 0);
-  const anomalyBreakdown = hasData ? computedBreakdown : FALLBACK_ANOMALY_BREAKDOWN;
+  const anomalyBreakdown = computedBreakdown;
   const totalAnomalies = anomalyBreakdown.reduce((s, a) => s + a.count, 0);
 
   return (

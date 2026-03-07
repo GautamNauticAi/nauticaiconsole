@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
-import { MOCK_INSPECTIONS, api } from "@/lib/api";
-import type { Severity } from "@/types";
+import { api } from "@/lib/api";
+import type { Inspection, Severity } from "@/types";
 
 const severityColor: Record<Severity, string> = {
   low:      "#10b981",
@@ -22,12 +22,29 @@ function maxSeverity(anomalies: { severity: Severity }[]): Severity | null {
   return null;
 }
 
+function anomalyCount(ins: Inspection): number {
+  if (ins.anomalies?.length) return ins.anomalies.length;
+  const classes = ins.detected_classes;
+  if (Array.isArray(classes)) return classes.length;
+  if (typeof classes === "string") {
+    try {
+      const arr = JSON.parse(classes) as string[];
+      return Array.isArray(arr) ? arr.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
 export default function ReportsPage() {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortBy, setSortBy] = useState<"date" | "risk">("date");
   const [hoverNew, setHoverNew] = useState(false);
+  const [inspections, setInspections] = useState<Inspection[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -35,10 +52,28 @@ export default function ReportsPage() {
     if (!token) router.replace("/login");
   }, [router]);
 
-  const inspections = MOCK_INSPECTIONS
+  useEffect(() => {
+    let active = true;
+    api
+      .listInspections()
+      .then((list) => {
+        if (active) setInspections(list);
+      })
+      .catch(() => {
+        if (active) setInspections([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const filtered = inspections
     .filter((i) => {
       if (filterStatus !== "all" && i.status !== filterStatus) return false;
-      if (search && !`${i.vessel_name} ${i.file_name}`.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !`${i.vessel_name ?? ""} ${i.file_name ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     })
     .sort((a, b) =>
@@ -150,19 +185,27 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {inspections.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={8} style={{ padding: "48px 20px", textAlign: "center", color: "rgba(186,230,255,0.5)", fontSize: 13 }}>
+                    Loading inspections…
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: "48px 20px", textAlign: "center", color: "rgba(186,230,255,0.35)", fontSize: 13 }}>
                     No inspections match your filters.
                   </td>
                 </tr>
               )}
-              {inspections.map((ins, i) => {
+              {!loading && filtered.map((ins, i) => {
                 const ms = maxSeverity(ins.anomalies ?? []);
                 const msColor = ms ? severityColor[ms] : "#94a3b8";
+                const rowId = ins.inspection_id ?? String(ins.id);
                 return (
-                  <tr key={ins.id} style={{
-                    borderBottom: i < inspections.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                  <tr key={rowId} style={{
+                    borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                   }}>
                     <td style={{ padding: "14px 20px" }}>
                       <span style={{ fontSize: 13, fontWeight: 600 }}>{ins.vessel_name ?? "—"}</span>
@@ -176,8 +219,8 @@ export default function ReportsPage() {
                       </span>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: (ins.anomalies?.length ?? 0) ? "#f59e0b" : "#10b981" }}>
-                        {ins.anomalies?.length ?? 0}
+                      <span style={{ fontSize: 13, fontWeight: 700, color: anomalyCount(ins) ? "#f59e0b" : "#10b981" }}>
+                        {anomalyCount(ins)}
                       </span>
                     </td>
                     <td style={{ padding: "14px 20px" }}>
@@ -236,7 +279,7 @@ export default function ReportsPage() {
                         {ins.status === "completed" && (
                           <>
                             <Link
-                              href={`/results/${ins.id}`}
+                              href={`/results/${ins.inspection_id ?? ins.id}`}
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -264,10 +307,9 @@ export default function ReportsPage() {
                             >
                               View
                             </Link>
-                            <a
-                              href={api.exportReportUrl(ins.id)}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => api.exportReportPdf(ins)}
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -276,13 +318,13 @@ export default function ReportsPage() {
                                 fontSize: 11,
                                 fontWeight: 600,
                                 color: "#e5e7eb",
-                                textDecoration: "none",
                                 padding: "5px 12px",
                                 borderRadius: 999,
                                 border: "1px solid rgba(148,163,184,0.45)",
                                 background: "rgba(15,23,42,0.96)",
                                 boxShadow: "0 3px 16px rgba(15,23,42,0.75)",
                                 transition: "opacity 0.16s ease",
+                                cursor: "pointer",
                               }}
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.opacity = "0.9";
@@ -291,8 +333,8 @@ export default function ReportsPage() {
                                 e.currentTarget.style.opacity = "1";
                               }}
                             >
-                              PDF ↗
-                            </a>
+                              Download PDF
+                            </button>
                           </>
                         )}
                       </div>
@@ -305,7 +347,7 @@ export default function ReportsPage() {
         </div>
 
         <p style={{ marginTop: 14, fontSize: 11, color: "rgba(186,230,255,0.30)", textAlign: "right" }}>
-          {inspections.length} inspection{inspections.length !== 1 ? "s" : ""} shown
+          {filtered.length} inspection{filtered.length !== 1 ? "s" : ""} shown
         </p>
       </div>
     </PageShell>
