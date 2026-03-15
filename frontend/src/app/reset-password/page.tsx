@@ -226,7 +226,7 @@ export default function ResetPasswordPage() {
         minHeight: "100vh",
         position: "relative",
         overflow: "hidden",
-        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        fontFamily: "'DM Sans', system-ui, sans-serif",
         color: "#fff",
         display: "flex",
         alignItems: "center",

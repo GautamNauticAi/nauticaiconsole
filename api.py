@@ -25,6 +25,13 @@ def _safe_load(*args, **kw):
     return _orig_torch_load(*args, **kw)
 torch.load = _safe_load
 
+# For ResNet species model (optional)
+try:
+    from torchvision import transforms
+    _HAS_TORCHVISION = True
+except Exception:
+    _HAS_TORCHVISION = False
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -51,18 +58,47 @@ except Exception:
 load_dotenv()
 POSTGRES_DSN = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+# Brevo SMTP (preferred when set): smtp-relay.brevo.com:587, TLS. User = SMTP login email from Brevo; password = SMTP key.
+BREVO_SMTP_USER = (os.getenv("BREVO_SMTP_USER") or "").strip() or None
+BREVO_SMTP_KEY = (os.getenv("BREVO_SMTP_KEY") or "").strip() or None
+BREVO_SMTP_HOST = os.getenv("BREVO_SMTP_HOST", "smtp-relay.brevo.com")
+BREVO_SMTP_PORT = int(os.getenv("BREVO_SMTP_PORT", "587"))
 RESET_SECRET = os.getenv("RESET_SECRET") or os.getenv("JWT_SECRET") or "change-me-in-production"
 FRONTEND_URL = os.getenv("FRONTEND_URL") or "https://nauticai-frontend.vercel.app"
+# Set NAUTICAI_SKIP_AUTH=1 to allow /detect without token (local model testing when DB is unreachable)
+SKIP_AUTH = os.getenv("NAUTICAI_SKIP_AUTH", "").strip().lower() in ("1", "true", "yes")
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "best.pt")
+# Model: use NAUTICAI_MODEL_PATH if set (e.g. to Prasad's updated best.pt), else default best.pt
+_MODEL_DIR = os.path.dirname(__file__)
+MODEL_PATH = os.getenv("NAUTICAI_MODEL_PATH") or os.path.join(_MODEL_DIR, "best.pt")
+if not os.path.isabs(MODEL_PATH):
+    MODEL_PATH = os.path.join(_MODEL_DIR, MODEL_PATH)
 
-# Model training metrics (from FinalUI/app.py)
-MODEL_METRICS = {
-    "precision": 0.886,
-    "recall":    0.844,
-    "map50":     0.882,
-    "map5095":   0.782,
-}
+# Model training metrics — override via env NAUTICAI_MODEL_METRICS="precision,recall,map50,map5095" (comma-separated)
+_DEFAULT_METRICS = {"precision": 0.886, "recall": 0.844, "map50": 0.882, "map5095": 0.782}
+_metrics_env = os.getenv("NAUTICAI_MODEL_METRICS")
+if _metrics_env:
+    try:
+        parts = [float(x.strip()) for x in _metrics_env.split(",")]
+        if len(parts) == 4:
+            MODEL_METRICS = {"precision": parts[0], "recall": parts[1], "map50": parts[2], "map5095": parts[3]}
+        else:
+            MODEL_METRICS = _DEFAULT_METRICS.copy()
+    except Exception:
+        MODEL_METRICS = _DEFAULT_METRICS.copy()
+else:
+    MODEL_METRICS = _DEFAULT_METRICS.copy()
+
+# Species classification model (runs on biofouling crops after best.pt)
+SPECIES_MODEL_PATH = os.getenv("NAUTICAI_SPECIES_MODEL_PATH") or os.path.join(_MODEL_DIR, "species.pt")
+if not os.path.isabs(SPECIES_MODEL_PATH):
+    SPECIES_MODEL_PATH = os.path.join(_MODEL_DIR, SPECIES_MODEL_PATH)
+# Real species class names (order = model index: 0, 1, 2, ...). Set in .env to replace "class_0", "class_1", etc.
+# Example: NAUTICAI_SPECIES_CLASSES=ALGAE,BARNACLES,TUBEWORMS,OTHER
+_env_species = os.getenv("NAUTICAI_SPECIES_CLASSES", "").strip()
+SPECIES_CLASS_NAMES = [s.strip() for s in _env_species.split(",") if s.strip()] if _env_species else []
+# Detection class names that trigger species classification (lowercase)
+BIOFOULING_CLASS_NAMES = {"biofouling", "marine growth", "marine_growth"}
 
 # ── Pydantic model for contact form ──────────────────────
 class ContactPayload(BaseModel):
@@ -83,6 +119,7 @@ def insert_contact_postgres(payload) -> bool:
 CLASS_COLORS_BGR = {
     "corrosion":      (60,  76,  231),   # red
     "marine growth":  (0,  165,  240),   # amber
+    "biofouling":     (0,  165,  240),   # amber (same as marine growth)
     "debris":         (34, 126,  230),   # orange
     "healthy surface":(176, 200,  0),    # teal
     "healthy":        (176, 200,  0),
@@ -108,8 +145,9 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# ── Lazy-load model (so Cloud Run startup probe passes before model loads) ──
+# ── Lazy-load models (so Cloud Run startup probe passes before model loads) ──
 _model = None
+_species_model = None
 
 def get_model():
     global _model
@@ -119,10 +157,186 @@ def get_model():
         print("Model loaded ✓")
     return _model
 
+def _load_resnet_species():
+    """Load species.pt as a PyTorch ResNet (or other nn.Module) checkpoint. Returns None on failure."""
+    if not _HAS_TORCHVISION:
+        return None
+    try:
+        ckpt = _orig_torch_load(SPECIES_MODEL_PATH, map_location="cpu", weights_only=False)
+        model = None
+        class_names = None
+        if isinstance(ckpt, dict):
+            model = ckpt.get("model")  # full nn.Module if saved that way
+            class_names = ckpt.get("class_names") or ckpt.get("classes") or ckpt.get("class_names_list")
+            if model is None and "state_dict" in ckpt:
+                state_dict = ckpt["state_dict"]
+                num_classes = ckpt.get("num_classes")
+                if num_classes is None and class_names is not None:
+                    num_classes = len(class_names)
+                if num_classes is None:
+                    for k, v in state_dict.items():
+                        if "fc" in k or "classifier" in k:
+                            if hasattr(v, "shape") and len(v.shape) >= 1:
+                                num_classes = v.shape[0]
+                                break
+                if num_classes is not None:
+                    try:
+                        from torchvision.models import resnet50
+                        model = resnet50(num_classes=num_classes)
+                        model.load_state_dict(state_dict, strict=False)
+                    except Exception:
+                        pass
+        elif hasattr(ckpt, "eval") and callable(getattr(ckpt, "forward", None)):
+            model = ckpt
+        if model is None:
+            return None
+        model.eval()
+        if class_names is None or (isinstance(class_names, (list, tuple)) and len(class_names) == 0):
+            num_classes = (
+                getattr(model, "num_classes", None)
+                or (getattr(model.fc, "out_features", None) if hasattr(model, "fc") else None)
+                or (getattr(model.classifier, "out_features", None) if hasattr(model, "classifier") else None)
+            )
+            if num_classes is None:
+                for _name, mod in model.named_modules():
+                    if "Linear" in type(mod).__name__ and hasattr(mod, "out_features"):
+                        num_classes = mod.out_features
+                        break
+            if num_classes is not None:
+                class_names = [f"class_{i}" for i in range(num_classes)]
+            else:
+                class_names = ["ALGAE", "BARNACLES", "TUBEWORMS", "OTHER"]
+        if isinstance(class_names, dict):
+            class_names = [class_names.get(i, f"class_{i}") for i in range(max(class_names.keys()) + 1)]
+        class_names = list(class_names)
+        # Override with env names if provided (use first N env names for N model classes)
+        if SPECIES_CLASS_NAMES:
+            n = len(class_names)
+            class_names = [SPECIES_CLASS_NAMES[i] if i < len(SPECIES_CLASS_NAMES) else f"class_{i}" for i in range(n)]
+        return {"type": "resnet", "model": model, "class_names": class_names}
+    except Exception as e:
+        print(f"ResNet species load failed: {e}")
+        return None
+
+
+def get_species_model():
+    """Lazy-load species classifier (YOLO or ResNet). Returns None if species.pt is missing or unloadable."""
+    global _species_model
+    if _species_model is not None:
+        return _species_model
+    if not os.path.isfile(SPECIES_MODEL_PATH):
+        print(f"Species model not found at {SPECIES_MODEL_PATH}, skipping species classification.")
+        return None
+    try:
+        print(f"Loading species model from {SPECIES_MODEL_PATH} ...")
+        _species_model = YOLO(SPECIES_MODEL_PATH)
+        print("Species model loaded (YOLO) ✓")
+        return _species_model
+    except Exception as e1:
+        print(f"YOLO load failed (trying ResNet): {e1}")
+        resnet_wrapper = _load_resnet_species()
+        if resnet_wrapper is not None:
+            _species_model = resnet_wrapper
+            print("Species model loaded (ResNet) ✓")
+            return _species_model
+        print("Species model failed to load. Skipping species classification.")
+        _species_model = None
+        return None
+
 # ── Helper: get box colour ────────────────────────────────
 def get_color(class_name: str):
     key = class_name.lower().strip()
     return CLASS_COLORS_BGR.get(key, DEFAULT_COLOR_BGR)
+
+
+def _run_resnet_species(crop_bgr: np.ndarray, wrapper: dict) -> list:
+    """Run ResNet species classifier on a BGR crop. Returns list of { class_name, confidence }."""
+    model = wrapper["model"]
+    class_names = wrapper["class_names"]
+    if not class_names:
+        return []
+    try:
+        # BGR -> RGB, resize 224x224, ImageNet normalize
+        crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+        crop_rgb = cv2.resize(crop_rgb, (224, 224), interpolation=cv2.INTER_LINEAR)
+        x = torch.from_numpy(crop_rgb).float().div(255.0).permute(2, 0, 1).unsqueeze(0)
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        x = (x - mean) / std
+        with torch.no_grad():
+            logits = model(x)
+        if hasattr(logits, "logits"):
+            logits = logits.logits
+        probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+        out = []
+        for idx in np.argsort(probs)[::-1][:5]:
+            if probs[idx] < 0.1:
+                break
+            name = class_names[idx] if idx < len(class_names) else f"class_{idx}"
+            out.append({"class_name": name, "confidence": float(round(probs[idx], 4))})
+        return out
+    except Exception as e:
+        print(f"ResNet species inference error: {e}")
+        return []
+
+
+def _run_species_on_crop(image_bgr: np.ndarray, x1: int, y1: int, x2: int, y2: int, padding: int = 8) -> list:
+    """Run species model on a cropped region. Returns list of { class_name, confidence }."""
+    model = get_species_model()
+    if model is None:
+        return []
+    H, W = image_bgr.shape[:2]
+    x1p = max(0, x1 - padding)
+    y1p = max(0, y1 - padding)
+    x2p = min(W, x2 + padding)
+    y2p = min(H, y2 + padding)
+    crop = image_bgr[y1p:y2p, x1p:x2p]
+    if crop.size == 0:
+        return []
+
+    # ResNet path (Prasad's species.pt)
+    if isinstance(model, dict) and model.get("type") == "resnet":
+        try:
+            return _run_resnet_species(crop, model)
+        except Exception as e:
+            print(f"Species inference error: {e}")
+            return []
+
+    # YOLO path
+    try:
+        results = model.predict(crop, conf=0.2, verbose=False)
+        r = results[0]
+        out = []
+        if r.boxes is not None and len(r.boxes) > 0:
+            cls_ids = r.boxes.cls.cpu().numpy().astype(int)
+            confs = r.boxes.conf.cpu().numpy()
+            for i in range(len(cls_ids)):
+                name = r.names[int(cls_ids[i])]
+                out.append({"class_name": name, "confidence": float(round(confs[i], 4))})
+        elif getattr(r, "probs", None) is not None:
+            probs = r.probs
+            names = getattr(r, "names", None) or {}
+            if hasattr(probs, "data"):
+                data = probs.data.cpu().numpy()
+                for idx in np.argsort(data)[::-1][:5]:
+                    if data[idx] < 0.1:
+                        break
+                    name = names.get(int(idx), f"class_{idx}")
+                    out.append({"class_name": name, "confidence": float(round(data[idx], 4))})
+            elif hasattr(probs, "top1") and hasattr(probs, "top1conf"):
+                out.append({
+                    "class_name": names.get(int(probs.top1), f"class_{probs.top1}"),
+                    "confidence": float(round(probs.top1conf.item(), 4)),
+                })
+        seen = {}
+        for s in out:
+            k = s["class_name"].lower()
+            if k not in seen or s["confidence"] > seen[k]["confidence"]:
+                seen[k] = s
+        return list(seen.values())[:5]
+    except Exception as e:
+        print(f"Species inference error: {e}")
+        return []
 
 
 # ── Helper: draw boxes on image (OpenCV) ─────────────────
@@ -148,8 +362,14 @@ def draw_boxes(image_bgr: np.ndarray, detections: list) -> np.ndarray:
             cv2.line(img, (cx, cy), (cx + dx, cy), color, 3)
             cv2.line(img, (cx, cy), (cx, cy + dy), color, 3)
 
-        # Label background + text
+        # Label: main class + optional species
         tag = f"{label}  {conf:.0%}"
+        species = det.get("species") or []
+        if species:
+            species_str = ", ".join(s["class_name"] for s in species[:3])
+            if len(species) > 3:
+                species_str += "..."
+            tag += "  |  " + species_str
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale, thick = 0.48, 1
         (tw, th), _ = cv2.getTextSize(tag, font, scale, thick)
@@ -326,8 +546,31 @@ def verify_reset_token(token: str) -> int | None:
 
 
 def send_brevo_email(to_email: str, subject: str, html_content: str) -> bool:
+    sender_email = os.getenv("BREVO_SENDER_EMAIL", "noreply@nauticai.com")
+    sender_name = os.getenv("BREVO_SENDER_NAME", "NautiCAI")
+
+    # Prefer SMTP if credentials are set
+    if BREVO_SMTP_USER and BREVO_SMTP_KEY:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"{sender_name} <{sender_email}>"
+            msg["To"] = to_email
+            msg.attach(MIMEText(html_content, "html"))
+            with smtplib.SMTP(BREVO_SMTP_HOST, BREVO_SMTP_PORT, timeout=10) as server:
+                server.starttls()
+                server.login(BREVO_SMTP_USER, BREVO_SMTP_KEY)
+                server.sendmail(sender_email, [to_email], msg.as_string())
+            return True
+        except Exception as e:
+            print(f"Brevo SMTP send exception: {e}")
+            return False
+
     if not BREVO_API_KEY:
-        print("BREVO_API_KEY not set; skipping email send")
+        print("BREVO_API_KEY and BREVO_SMTP_* not set; skipping email send")
         return False
     try:
         with httpx.Client(timeout=10.0) as client:
@@ -335,7 +578,7 @@ def send_brevo_email(to_email: str, subject: str, html_content: str) -> bool:
                 "https://api.brevo.com/v3/smtp/email",
                 headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json"},
                 json={
-                    "sender": {"email": "noreply@nauticai.com", "name": "NautiCAI"},
+                    "sender": {"email": sender_email, "name": sender_name},
                     "to": [{"email": to_email}],
                     "subject": subject,
                     "htmlContent": html_content,
@@ -586,8 +829,9 @@ async def detect(
       inspection_id: str
       model_metrics: { precision, recall, map50, map5095 }
     """
-    # Require auth
-    require_auth(authorization)
+    # Require auth (unless NAUTICAI_SKIP_AUTH=1 for local model testing when DB is down)
+    if not SKIP_AUTH:
+        require_auth(authorization)
 
     # Validate
     allowed = {"image/jpeg", "image/png", "image/jpg", "image/webp",
@@ -661,6 +905,17 @@ async def detect(
                 "y2": float(xyxy[i][3]),
             })
 
+    # ── Species classification on biofouling crops (pipeline stage 2) ──
+    for det in detections:
+        if det["class_name"].lower().strip() in BIOFOULING_CLASS_NAMES:
+            species_list = _run_species_on_crop(
+                image_bgr,
+                int(det["x1"]), int(det["y1"]), int(det["x2"]), int(det["y2"]),
+            )
+            det["species"] = species_list
+        else:
+            det["species"] = []
+
     # ── Draw annotated image ──────────────────────────────
     annotated_bgr = draw_boxes(image_bgr, detections)
     annotated_b64 = img_to_b64(annotated_bgr)
@@ -707,6 +962,7 @@ async def detect(
     # ── Response ──────────────────────────────────────────
     return JSONResponse({
         "inspection_id":   inspection_id,
+        "file_name":       file.filename,
         "detections":      detections,
         "annotated_image": annotated_b64,
         "summary": {
@@ -797,14 +1053,55 @@ async def get_inspections(limit: int = 20, inspection_id: Optional[str] = None):
             conn.close()
 
 
+# ══════════════════════════════════════════════════════════
+#  ENDPOINT: DELETE /inspections/{id}
+# ══════════════════════════════════════════════════════════
+@app.delete("/inspections/{inspection_db_id}")
+async def delete_inspection(inspection_db_id: str):
+    """Delete an inspection by its database id (primary key)."""
+    if not POSTGRES_DSN or psycopg2 is None:
+        raise HTTPException(500, "Database not configured")
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN)
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM inspections WHERE id = %s", (inspection_db_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(404, "Inspection not found")
+        conn.commit()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Delete inspection error: {e}")
+        raise HTTPException(500, "Failed to delete inspection")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # ── Health check ──────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "model": MODEL_PATH,
-        "postgres": bool(POSTGRES_DSN),
-    }
+    """Includes a real DB ping when POSTGRES_DSN is set so you can verify Neon from the API."""
+    out = {"status": "ok", "model": MODEL_PATH, "postgres_configured": bool(POSTGRES_DSN)}
+    if POSTGRES_DSN and psycopg2:
+        conn = None
+        try:
+            conn = psycopg2.connect(POSTGRES_DSN, connect_timeout=5)
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            out["postgres"] = "ok"
+        except Exception as e:
+            out["postgres"] = "error"
+            out["postgres_error"] = str(e)
+        finally:
+            if conn is not None:
+                conn.close()
+    else:
+        out["postgres"] = "not_configured"
+    return out
 
 
 # ── Debug: verify loaded module and routes ───────────────────────────────────

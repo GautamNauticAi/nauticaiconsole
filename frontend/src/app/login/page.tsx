@@ -43,7 +43,7 @@ export default function LoginPage() {
   const [showForgot, setShowForgot] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
 
-  const strength = mode === "signup" ? getPasswordStrength(password) : null;
+  const strength = getPasswordStrength(password);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -117,7 +117,7 @@ export default function LoginPage() {
         minHeight: "100vh",
         position: "relative",
         overflow: "hidden",
-        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        fontFamily: "'DM Sans', system-ui, sans-serif",
         color: "#fff",
       }}
     >
@@ -140,7 +140,7 @@ export default function LoginPage() {
       </div>
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap');
         input::placeholder { color: rgba(186,230,255,0.35); }
         input:focus { border-color: rgba(124,58,237,0.70) !important; }
         @keyframes fade-up { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
@@ -655,30 +655,35 @@ export default function LoginPage() {
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
-                {strength && (
-                  <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                    <div
-                      style={{
-                        flex: 1,
-                        height: 4,
-                        borderRadius: 999,
-                        background: "rgba(255,255,255,0.1)",
-                        overflow: "hidden",
-                      }}
-                    >
+                {mode === "signup" && strength !== null && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(186,230,255,0.55)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Password strength
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div
                         style={{
-                          height: "100%",
-                          width: strength === "weak" ? "33%" : strength === "fair" ? "66%" : "100%",
-                          background: strengthColor[strength],
+                          flex: 1,
+                          height: 6,
                           borderRadius: 999,
-                          transition: "width 0.2s",
+                          background: "rgba(255,255,255,0.1)",
+                          overflow: "hidden",
                         }}
-                      />
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: strength === "weak" ? "33%" : strength === "fair" ? "66%" : "100%",
+                            background: strengthColor[strength],
+                            borderRadius: 999,
+                            transition: "width 0.2s",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: 11, color: strengthColor[strength], fontWeight: 700, textTransform: "capitalize", minWidth: 52 }}>
+                        {strength === "weak" ? "Weak" : strength === "fair" ? "Fair" : "Strong"}
+                      </span>
                     </div>
-                    <span style={{ fontSize: 10, color: strengthColor[strength], fontWeight: 600, textTransform: "capitalize" }}>
-                      {strength}
-                    </span>
                   </div>
                 )}
               </div>

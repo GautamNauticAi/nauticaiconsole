@@ -18,7 +18,7 @@ export function PageShell({
         minHeight: "100vh",
         position: "relative",
         /* removed overflow:hidden — it was clipping page content */
-        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        fontFamily: "'DM Sans', system-ui, sans-serif",
         color: "#fff",
       }}
     >

@@ -18,7 +18,7 @@ export default function LearnPage() {
           maxWidth: 1120,
           margin: "0 auto",
           padding: "40px 40px 56px",
-          fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+          fontFamily: "'DM Sans', system-ui, sans-serif",
         }}
       >
         {/* Header */}

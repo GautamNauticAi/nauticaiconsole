@@ -1,11 +1,58 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
+import { PdfViewerModal } from "@/components/PdfViewerModal";
 import { api } from "@/lib/api";
 import type { Inspection, Severity, DashboardStats } from "@/types";
+
+function computeStatsFromList(inspections: Inspection[]): DashboardStats {
+  if (!inspections.length) {
+    return { total_inspections: 0, high_risk_count: 0, total_anomalies: 0, avg_risk_score: 0 };
+  }
+  const total_inspections = inspections.length;
+  const high_risk_count = inspections.filter(
+    (i) => i.risk_level === "HIGH" || i.risk_level === "CRITICAL"
+  ).length;
+  const classCount = (i: Inspection): number => {
+    const c = i.detected_classes;
+    if (Array.isArray(c)) return c.length;
+    if (typeof c === "string") {
+      try {
+        const arr = JSON.parse(c) as unknown;
+        return Array.isArray(arr) ? arr.length : 0;
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  };
+  const total_anomalies = inspections.reduce((sum, i) => sum + classCount(i), 0);
+  const riskScoreFor = (i: Inspection): number => {
+    switch (i.risk_level) {
+      case "HIGH":
+      case "CRITICAL":
+        return 8.5;
+      case "MEDIUM":
+        return 5.5;
+      case "LOW":
+        return 3.0;
+      case "SAFE":
+      default:
+        return 1.0;
+    }
+  };
+  const avg_risk_score =
+    inspections.reduce((sum, i) => sum + riskScoreFor(i), 0) / total_inspections;
+  return {
+    total_inspections,
+    high_risk_count,
+    total_anomalies,
+    avg_risk_score,
+  };
+}
 
 const severityColor: Record<Severity, string> = {
   low:      "#10b981",
@@ -21,43 +68,73 @@ const statusColor: Record<string, string> = {
   failed:     "#ef4444",
 };
 
-function StatCard({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent: string }) {
+function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div style={{
-      background: "rgba(255,255,255,0.05)",
-      border: "1px solid rgba(255,255,255,0.09)",
-      borderRadius: 16, padding: "22px 24px",
-      display: "flex", flexDirection: "column", gap: 6,
+      background: "#1e293b",
+      border: "1px solid #334155",
+      borderRadius: 8,
+      padding: "20px 22px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 4,
     }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.50)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{label}</span>
-      <span style={{ fontSize: "2rem", fontWeight: 800, color: accent, lineHeight: 1 }}>{value}</span>
-      {sub && <span style={{ fontSize: 11, color: "rgba(226,238,255,0.50)" }}>{sub}</span>}
+      <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", letterSpacing: "0.02em" }}>{label}</span>
+      <span style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", lineHeight: 1.2 }}>{value}</span>
+      {sub && <span style={{ fontSize: 11, color: "#64748b" }}>{sub}</span>}
     </div>
   );
 }
 
 function RiskBadge({ score }: { score: number }) {
-  const color = score >= 8 ? "#dc2626" : score >= 5 ? "#f59e0b" : "#10b981";
+  const color = score >= 8 ? "#dc2626" : score >= 5 ? "#d97706" : "#059669";
   const label = score >= 8 ? "Critical" : score >= 5 ? "High" : "Low";
   return (
     <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      fontSize: 11, fontWeight: 700, color,
-      background: `${color}18`, border: `1px solid ${color}44`,
-      borderRadius: 999, padding: "2px 10px",
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 12, fontWeight: 600, color: "#f1f5f9",
+      background: "#334155",
+      border: "1px solid #475569",
+      borderRadius: 4,
+      padding: "4px 8px",
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, display: "inline-block" }} />
-      {label} {score.toFixed(1)}
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />
+      <span>{label}</span>
+      <span style={{ color: "#94a3b8", marginLeft: 2 }}>{score.toFixed(1)}</span>
     </span>
   );
 }
 
 export default function Dashboard() {
   const router = useRouter();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [inspections, setInspections] = useState<Inspection[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hoverNew, setHoverNew] = useState(false);
+  const [viewingPdf, setViewingPdf] = useState<Inspection | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchList = useCallback((forceRefresh = false) => {
+    api
+      .listInspections(forceRefresh)
+      .then(setInspections)
+      .catch(() => setInspections([]));
+  }, []);
+
+  const handleDelete = useCallback(async (ins: Inspection) => {
+    const id = String(ins.id);
+    if (!id) return;
+    if (!confirm("Remove this inspection? This cannot be undone.")) return;
+    setDeletingId(id);
+    try {
+      await api.deleteInspection(id);
+      setInspections((prev) => (prev ?? []).filter((i) => String(i.id) !== id));
+      const list = await api.listInspections();
+      setInspections(list);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to delete");
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -65,43 +142,40 @@ export default function Dashboard() {
     if (!token) router.replace("/login");
   }, [router]);
 
+  // Single source of truth: fetch inspections once, derive stats from it
   useEffect(() => {
     let active = true;
-    (async () => {
-      try {
-        const [s, list] = await Promise.all([
-          api.getStats(),
-          api.listInspections(),
-        ]);
-        if (!active) return;
-        setStats(s);
-        setInspections(list);
-      } catch {
-        if (!active) return;
-        setStats({
-          total_inspections: 0,
-          high_risk_count: 0,
-          total_anomalies: 0,
-          avg_risk_score: 0,
-        });
-        setInspections([]);
-      } finally {
+    setLoading(true);
+    api
+      .listInspections()
+      .then((list) => {
+        if (active) setInspections(list);
+      })
+      .catch(() => {
+        if (active) setInspections([]);
+      })
+      .finally(() => {
         if (active) setLoading(false);
-      }
-    })();
+      });
     return () => {
       active = false;
     };
   }, []);
 
-  const emptyStats: DashboardStats = {
-    total_inspections: 0,
-    high_risk_count: 0,
-    total_anomalies: 0,
-    avg_risk_score: 0,
-  };
-  const effectiveStats = stats ?? emptyStats;
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchList(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [fetchList]);
+
   const effectiveInspections: Inspection[] = inspections ?? [];
+  const effectiveStats = useMemo(
+    () => computeStatsFromList(effectiveInspections),
+    [effectiveInspections]
+  );
 
   const breakdownBase = [
     { key: "corrosion", label: "Corrosion", color: "#ef4444" },
@@ -141,46 +215,46 @@ export default function Dashboard() {
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 48px" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 36, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
           <div>
-            <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 4 }}>
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 600, color: "#f1f5f9", marginBottom: 4 }}>
               Overview
             </h1>
-            <p style={{ fontSize: 13, color: "rgba(186,230,255,0.55)" }}>
-              Hull inspection activity — all vessels
+            <p style={{ fontSize: 13, color: "#64748b" }}>
+              Hull inspection activity
             </p>
           </div>
           <Link
             href="/inspect"
-            onMouseEnter={() => setHoverNew(true)}
-            onMouseLeave={() => setHoverNew(false)}
             style={{
               fontSize: 13,
               fontWeight: 700,
-              color: hoverNew ? "#f9fafb" : "#020617",
-              background: hoverNew ? "rgba(15,23,42,0.98)" : "#f9fafb",
+              color: "#0d0422",
+              background: "#fff",
               borderRadius: 999,
-              padding: "9px 22px",
+              padding: "8px 20px",
               textDecoration: "none",
-              border: hoverNew
-                ? "1px solid rgba(148,163,184,0.55)"
-                : "1px solid rgba(148,163,184,0.25)",
-              boxShadow: hoverNew
-                ? "0 0 0 1px rgba(15,23,42,0.9)"
-                : "0 4px 20px rgba(15,23,42,0.65)",
-              transition: "all 0.16s ease",
+              transition: "background 0.2s ease, color 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#0d0422";
+              e.currentTarget.style.color = "#fff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#fff";
+              e.currentTarget.style.color = "#0d0422";
             }}
           >
-            + New Inspection
+            New inspection
           </Link>
         </div>
 
         {/* Stat cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
-          <StatCard label="Total Inspections" value={effectiveStats.total_inspections}  sub="all time"              accent="#fff" />
-          <StatCard label="High Risk Vessels"  value={effectiveStats.high_risk_count}    sub="risk score ≥ 8"        accent="#ef4444" />
-          <StatCard label="Anomalies Found"    value={effectiveStats.total_anomalies}    sub="across all inspections" accent="#f59e0b" />
-          <StatCard label="Avg Risk Score"     value={effectiveStats.avg_risk_score.toFixed(1)} sub="out of 10"      accent="#7c3aed" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
+          <StatCard label="Total inspections" value={effectiveStats.total_inspections} sub="All time" />
+          <StatCard label="High risk" value={effectiveStats.high_risk_count} sub="Score ≥ 8" />
+          <StatCard label="Anomalies found" value={effectiveStats.total_anomalies} sub="Across inspections" />
+          <StatCard label="Avg risk score" value={effectiveStats.avg_risk_score.toFixed(1)} sub="Out of 10" />
         </div>
 
         {/* Main grid */}
@@ -188,214 +262,159 @@ export default function Dashboard() {
 
           {/* Inspections table */}
           <div style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, overflow: "hidden",
+            background: "#1e293b",
+            border: "1px solid #334155",
+            borderRadius: 8,
+            overflow: "hidden",
           }}>
             <div style={{
-              padding: "18px 24px",
-              borderBottom: "1px solid rgba(255,255,255,0.07)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "16px 20px",
+              borderBottom: "1px solid #334155",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}>
-              <span style={{ fontSize: 14, fontWeight: 700 }}>Recent Inspections</span>
-              <Link href="/reports" style={{ fontSize: 12, color: "rgba(186,230,255,0.60)", textDecoration: "none" }}>
-                View all →
-              </Link>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9" }}>Recent inspections</span>
+              <Link href="/reports" style={{ fontSize: 13, color: "#64748b", textDecoration: "none", fontWeight: 500 }}>View all</Link>
             </div>
 
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                  {[
-                    { label: "Vessel",    align: "left" },
-                    { label: "File",      align: "left" },
-                    { label: "Anomalies", align: "center" },
-                    { label: "Risk",      align: "center" },
-                    { label: "Status",    align: "center" },
-                    { label: "Date",      align: "left" },
-                    { label: "",          align: "right" },
-                  ].map((col) => (
-                    <th
-                      key={col.label + col.align}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 640 }}>
+                <colgroup>
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "10%" }} />
+                </colgroup>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #334155", background: "#0f172a" }}>
+                    {[
+                      { label: "Vessel", align: "left" as const },
+                      { label: "File", align: "left" as const },
+                      { label: "Anomalies", align: "center" as const },
+                      { label: "Risk", align: "center" as const },
+                      { label: "Status", align: "center" as const },
+                      { label: "Date", align: "left" as const },
+                      { label: "", align: "right" as const },
+                    ].map((col) => (
+                      <th
+                        key={col.label || "actions"}
+                        style={{
+                          padding: "12px 16px",
+                          textAlign: col.align,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#64748b",
+                          letterSpacing: "0.03em",
+                        }}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {effectiveInspections.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "32px 16px", textAlign: "center", color: "#64748b", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
+                    </tr>
+                  )}
+                  {effectiveInspections.map((ins, i) => (
+                    <tr
+                      key={ins.id}
                       style={{
-                        padding: "11px 24px",
-                        textAlign: col.align as "left" | "center" | "right",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "rgba(186,230,255,0.45)",
-                        letterSpacing: "0.07em",
-                        textTransform: "uppercase",
+                        borderBottom: i < effectiveInspections.length - 1 ? "1px solid #334155" : "none",
                       }}
                     >
-                      {col.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {effectiveInspections.map((ins, i) => (
-                  <tr
-                    key={ins.id}
-                    style={{
-                      borderBottom:
-                        i < effectiveInspections.length - 1
-                          ? "1px solid rgba(255,255,255,0.05)"
-                          : "none",
-                      transition: "background 0.15s",
-                    }}
-                  >
-                    <td style={{ padding: "14px 24px", textAlign: "center" }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{ins.vessel_name ?? "—"}</span>
-                    </td>
-                    <td style={{ padding: "14px 24px", textAlign: "center" }}>
-                      <span style={{ fontSize: 12, color: "rgba(186,230,255,0.60)", fontFamily: "monospace" }}>
-                        {ins.file_name ?? "—"}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 24px", textAlign: "center" }}>
-                      {(() => {
-                        const anyIns = ins as any;
-                        const anomaliesArr = Array.isArray(anyIns.anomalies)
-                          ? anyIns.anomalies
-                          : Array.isArray(anyIns.detected_classes)
-                          ? anyIns.detected_classes
-                          : [];
-                        const count = anomaliesArr.length;
-                        const has = count > 0;
-                        return (
-                          <span
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: has ? "#f59e0b" : "#10b981",
-                            }}
-                          >
-                            {count}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td style={{ padding: "14px 24px" }}>
-                      {ins.status === "completed" ? (
-                        (() => {
+                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
+                        <span style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.vessel_name ?? undefined}>{ins.vessel_name ?? "—"}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.file_name ?? undefined}>{ins.file_name ?? "—"}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                        {(() => {
                           const anyIns = ins as any;
-                          const numeric =
-                            typeof anyIns.risk_score === "number"
-                              ? anyIns.risk_score
-                              : anyIns.risk_level === "HIGH" ||
-                                anyIns.risk_level === "CRITICAL"
-                              ? 8.5
-                              : anyIns.risk_level === "MEDIUM"
-                              ? 5.5
-                              : anyIns.risk_level === "LOW"
-                              ? 3.0
-                              : 1.0;
-                          return <RiskBadge score={numeric} />;
-                        })()
-                      ) : (
-                        <span
-                          style={{
-                            color: "rgba(186,230,255,0.35)",
-                            fontSize: 12,
-                          }}
-                        >
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "14px 24px" }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700,
-                        color: statusColor[ins.status],
-                        background: `${statusColor[ins.status]}18`,
-                        border: `1px solid ${statusColor[ins.status]}44`,
-                        borderRadius: 999, padding: "3px 10px",
-                        textTransform: "capitalize",
-                      }}>{ins.status}</span>
-                    </td>
-                    <td style={{ padding: "14px 24px" }}>
-                      <span style={{ fontSize: 12, color: "rgba(186,230,255,0.45)" }}>
-                        {new Date(ins.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 24px", textAlign: "right" }}>
-                      {ins.status === "completed" && (
-                        <Link
-                          href={`/results/${ins.id}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            minWidth: 72,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: "#a78bfa",
-                            textDecoration: "none",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            border: "1px solid rgba(167,139,250,0.35)",
-                            background: "rgba(15,23,42,0.95)",
-                          }}
-                        >
-                          View
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          const anomaliesArr = Array.isArray(anyIns.anomalies) ? anyIns.anomalies : Array.isArray(anyIns.detected_classes) ? anyIns.detected_classes : [];
+                          const count = anomaliesArr.length;
+                          return <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{count}</span>;
+                        })()}
+                      </td>
+                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                        {ins.status === "completed" ? (
+                          (() => {
+                            const anyIns = ins as any;
+                            const numeric = typeof anyIns.risk_score === "number" ? anyIns.risk_score : anyIns.risk_level === "HIGH" || anyIns.risk_level === "CRITICAL" ? 8.5 : anyIns.risk_level === "MEDIUM" ? 5.5 : anyIns.risk_level === "LOW" ? 3.0 : 1.0;
+                            return <RiskBadge score={numeric} />;
+                          })()
+                        ) : <span style={{ color: "#64748b", fontSize: 12 }}>—</span>}
+                      </td>
+                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8", textTransform: "capitalize" }}>{ins.status}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px" }}>
+                        <span style={{ fontSize: 12, color: "#94a3b8" }}>{new Date(ins.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                        {ins.status === "completed" && (
+                          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center" }}>
+                            <button type="button" onClick={() => setViewingPdf(ins)} style={{ fontSize: 12, fontWeight: 600, color: "#64748b", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>View</button>
+                            <button type="button" onClick={() => handleDelete(ins)} disabled={deletingId === String(ins.id)} style={{ fontSize: 12, fontWeight: 600, color: "#f87171", background: "none", border: "none", cursor: deletingId === String(ins.id) ? "wait" : "pointer", padding: 0 }}>{deletingId === String(ins.id) ? "…" : "Remove"}</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Anomaly breakdown */}
           <div style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 16, padding: "20px 22px",
-            display: "flex", flexDirection: "column", gap: 16,
+            background: "#1e293b",
+            border: "1px solid #334155",
+            borderRadius: 8,
+            padding: "20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
           }}>
-            <span style={{ fontSize: 14, fontWeight: 700 }}>Anomaly Breakdown</span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9" }}>Anomaly breakdown</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {anomalyBreakdown.map((a) => (
                 <div key={a.label}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(226,238,255,0.80)" }}>{a.label}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: a.color }}>{a.count}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, color: "#e2e8f0" }}>{a.label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#f1f5f9" }}>{a.count}</span>
                   </div>
-                  <div style={{ height: 5, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div style={{ height: 4, borderRadius: 2, background: "#334155", overflow: "hidden" }}>
                     <div style={{
-                      height: "100%", borderRadius: 999,
-                      background: a.color,
-                      width: `${(a.count / totalAnomalies) * 100}%`,
-                      transition: "width 0.6s ease",
+                      height: "100%",
+                      borderRadius: 2,
+                      background: "#64748b",
+                      width: `${totalAnomalies ? (a.count / totalAnomalies) * 100 : 0}%`,
                     }} />
                   </div>
                 </div>
               ))}
             </div>
-
-            {/* Quick links */}
-            <div style={{ marginTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.40)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Quick Actions</span>
-              {[
-                { label: "Start New Inspection", href: "/inspect",   color: "#7c3aed" },
-                { label: "View All Reports",      href: "/reports",   color: "#3b82f6" },
-              ].map((l) => (
-                <Link key={l.href} href={l.href} style={{
-                  display: "block", fontSize: 13, fontWeight: 600,
-                  color: l.color, textDecoration: "none",
-                  padding: "8px 12px", borderRadius: 8,
-                  background: `${l.color}12`,
-                  border: `1px solid ${l.color}28`,
-                  textAlign: "center",
-                  transition: "opacity 0.18s",
-                }}>{l.label}</Link>
-              ))}
+            <div style={{ borderTop: "1px solid #334155", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", letterSpacing: "0.02em" }}>Quick actions</span>
+              <Link href="/inspect" style={{ fontSize: 13, color: "#94a3b8", textDecoration: "none", padding: "8px 0" }}>New inspection</Link>
+              <Link href="/reports" style={{ fontSize: 13, color: "#94a3b8", textDecoration: "none", padding: "8px 0" }}>View all reports</Link>
             </div>
           </div>
 
         </div>
       </div>
+
+      {viewingPdf && (
+        <PdfViewerModal inspection={viewingPdf} annotatedImage={null} onClose={() => setViewingPdf(null)} />
+      )}
     </PageShell>
   );
 }

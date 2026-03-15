@@ -25,11 +25,25 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function listInspectionsInternal(): Promise<Inspection[]> {
+const INSPECTIONS_CACHE_TTL_MS = 20_000; // 20 seconds
+let inspectionsCache: { data: Inspection[]; ts: number } | null = null;
+
+export function invalidateInspectionsCache(): void {
+  inspectionsCache = null;
+}
+
+async function listInspectionsInternal(forceRefresh = false): Promise<Inspection[]> {
+  const now = Date.now();
+  if (!forceRefresh && inspectionsCache && now - inspectionsCache.ts < INSPECTIONS_CACHE_TTL_MS) {
+    return inspectionsCache.data;
+  }
   try {
     const payload = await req<{ inspections: Inspection[] }>("/inspections");
-    return payload.inspections ?? [];
+    const data = payload.inspections ?? [];
+    inspectionsCache = { data, ts: now };
+    return data;
   } catch {
+    if (inspectionsCache) return inspectionsCache.data;
     return [];
   }
 }
@@ -40,17 +54,38 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     if (vesselName) form.append("vessel_name", vesselName);
-    return req<DetectResponse>("/detect", { method: "POST", body: form });
+    const res = await req<DetectResponse>("/detect", { method: "POST", body: form });
+    invalidateInspectionsCache();
+    return res;
   },
 
-  /* Inspections list + detail (from Supabase via FastAPI) */
-  async listInspections(): Promise<Inspection[]> {
-    return listInspectionsInternal();
+  /* Inspections list + detail (from Supabase via FastAPI). Cached for 20s for fast Dashboard/Reports navigation. */
+  async listInspections(forceRefresh = false): Promise<Inspection[]> {
+    return listInspectionsInternal(forceRefresh);
   },
 
   async getInspection(inspectionId: string): Promise<Inspection | undefined> {
     const inspections = await listInspectionsInternal();
     return inspections.find((i) => i.inspection_id === inspectionId);
+  },
+
+  /** Delete an inspection by its database id. */
+  async deleteInspection(id: string): Promise<void> {
+    const headers: HeadersInit = {};
+    if (typeof window !== "undefined") {
+      const token = window.localStorage.getItem("nauticai:token");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${getBase()}/inspections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const msg = typeof data?.detail === "string" ? data.detail : "Failed to delete";
+      throw new Error(msg);
+    }
+    invalidateInspectionsCache();
   },
 
   /* Stats derived from inspections list */
@@ -138,7 +173,7 @@ export const api = {
       inspection_id: detect.inspection_id,
       status: "completed",
       created_at: detect.timestamp,
-      file_name: null,
+      file_name: detect.file_name ?? null,
       vessel_name: null,
       detected_classes: detect.detections.map((d) => d.class_name),
       anomalies: null,

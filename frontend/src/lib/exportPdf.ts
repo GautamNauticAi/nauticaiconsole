@@ -22,10 +22,11 @@ function getDetectedClasses(ins: Inspection): string[] {
   return [];
 }
 
-export function exportInspectionPdf(
+/** Build the inspection PDF doc (shared for download and viewer). */
+function buildInspectionPdfDoc(
   inspection: Inspection,
   annotatedImageDataUrl?: string | null
-): void {
+): jsPDF {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   let y = MARGIN;
 
@@ -113,7 +114,25 @@ export function exportInspectionPdf(
     MARGIN,
     285
   );
+  return doc;
+}
 
+export function exportInspectionPdf(
+  inspection: Inspection,
+  annotatedImageDataUrl?: string | null
+): void {
+  const doc = buildInspectionPdfDoc(inspection, annotatedImageDataUrl);
+  const id = inspection.inspection_id ?? String(inspection.id);
   const safeId = id.replace(/[^a-zA-Z0-9-]/g, "_");
   doc.save(`NauticAI-Report-${safeId}.pdf`);
+}
+
+/** Return a blob URL for the inspection PDF (for in-app viewer). Caller must revoke the URL when done. */
+export function getInspectionPdfBlobUrl(
+  inspection: Inspection,
+  annotatedImageDataUrl?: string | null
+): string {
+  const doc = buildInspectionPdfDoc(inspection, annotatedImageDataUrl);
+  const blob = doc.output("blob");
+  return URL.createObjectURL(blob);
 }

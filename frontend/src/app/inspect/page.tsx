@@ -67,12 +67,13 @@ export default function InspectPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [stage, setStage] = useState<Stage>("idle");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
   const [vesselName, setVesselName] = useState("");
   const [notes, setNotes] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [errMsg, setErrMsg] = useState("");
 
   useEffect(() => {
@@ -81,14 +82,18 @@ export default function InspectPage() {
     if (!token) router.replace("/login");
   }, [router]);
 
-  const acceptFile = useCallback((f: File) => {
-    if (!ACCEPTED_TYPES.includes(f.type)) {
+  const acceptFiles = useCallback((fileList: FileList | File[]) => {
+    const arr = Array.from(fileList);
+    const valid = arr.filter((f) => ACCEPTED_TYPES.includes(f.type));
+    if (valid.length === 0 && arr.length > 0) {
       setErrMsg("Only JPG, PNG, WebP or MP4 files are accepted.");
       return;
     }
-    setFile(f);
+    if (valid.length === 0) return;
+    setFiles(valid);
     setStage("selected");
-    if (f.type.startsWith("image/")) setPreview(URL.createObjectURL(f));
+    const first = valid[0];
+    if (first.type.startsWith("image/")) setPreview(URL.createObjectURL(first));
     else setPreview(null);
     setErrMsg("");
   }, []);
@@ -97,47 +102,61 @@ export default function InspectPage() {
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setDragActive(false);
-      const f = e.dataTransfer.files?.[0];
-      if (f) acceptFile(f);
+      const list = e.dataTransfer.files;
+      if (list?.length) acceptFiles(list);
     },
-    [acceptFile],
+    [acceptFiles],
   );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null;
-    if (f) acceptFile(f);
+    const list = e.target.files;
+    if (list?.length) acceptFiles(list);
+    e.target.value = "";
   };
 
   const runInspection = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
     setStage("uploading");
     setProgress(0);
     setErrMsg("");
-    const tick = window.setInterval(() => {
-      setProgress((p) => Math.min(p + 12, 85));
-    }, 180);
-    try {
-      const res: DetectResponse = await api.upload(file, vesselName || undefined);
-      window.clearInterval(tick);
-      setProgress(100);
-      setStage("processing");
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      setStage("done");
-      if (typeof window !== "undefined")
-        window.sessionStorage.setItem("nauticai:lastInspection", JSON.stringify(res));
-      setTimeout(() => {
-        router.push(`/results/${encodeURIComponent(res.inspection_id)}?source=live`);
-      }, 600);
-    } catch (err) {
-      window.clearInterval(tick);
-      setStage("error");
-      setErrMsg(err instanceof Error ? err.message : "Unexpected error");
+    setCurrentFileIndex(0);
+    const total = files.length;
+    const results: DetectResponse[] = [];
+    let lastError: string | null = null;
+    for (let i = 0; i < files.length; i++) {
+      setCurrentFileIndex(i + 1);
+      setProgress(Math.round(((i + 0.5) / total) * 90));
+      try {
+        const res: DetectResponse = await api.upload(files[i], vesselName || undefined);
+        results.push(res);
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : "Upload failed";
+      }
     }
+    setProgress(95);
+    if (results.length === 0) {
+      setStage("error");
+      setErrMsg(lastError ?? "All uploads failed");
+      return;
+    }
+    setProgress(100);
+    setStage("processing");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    setStage("done");
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("nauticai:lastInspection", JSON.stringify(results[0]));
+      window.sessionStorage.setItem("nauticai:lastInspectionBatch", JSON.stringify(results));
+    }
+    const firstId = results[0].inspection_id;
+    const query = results.length > 1 ? "?source=live&batch=1" : "?source=live";
+    setTimeout(() => {
+      router.push(`/results/${encodeURIComponent(firstId)}${query}`);
+    }, 500);
   };
 
   const reset = () => {
     setStage("idle");
-    setFile(null);
+    setFiles([]);
     setPreview(null);
     setVesselName("");
     setNotes("");
@@ -251,23 +270,36 @@ export default function InspectPage() {
                 ref={inputRef}
                 type="file"
                 accept={ACCEPTED_TYPES.join(",")}
+                multiple
                 style={{ display: "none" }}
                 onChange={handleFileChange}
               />
 
-              {preview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={preview}
-                  alt="Preview"
-                  style={{
-                    maxWidth: "100%",
-                    maxHeight: "75%",
-                    borderRadius: 10,
-                    objectFit: "cover",
-                    border: "1px solid rgba(56,189,248,0.35)",
-                  }}
-                />
+              {preview || files.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, width: "100%" }}>
+                  {preview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={preview}
+                      alt="Preview"
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: "min(40vh, 200px)",
+                        borderRadius: 10,
+                        objectFit: "contain",
+                        border: "1px solid rgba(56,189,248,0.35)",
+                      }}
+                    />
+                  )}
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(226,232,240,0.95)" }}>
+                    {files.length} image{files.length !== 1 ? "s" : ""} selected
+                  </p>
+                  {files.length > 1 && (
+                    <p style={{ fontSize: 10, color: "rgba(148,163,184,0.85)" }}>
+                      Run inspection to process all
+                    </p>
+                  )}
+                </div>
               ) : (
                 <>
                   {/* upload icon */}
@@ -292,10 +324,10 @@ export default function InspectPage() {
                   </div>
 
                   <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: "rgba(226,232,240,0.95)" }}>
-                    Drag &amp; drop hull media here
+                    Drag &amp; drop images here
                   </p>
                   <p style={{ fontSize: 11, color: "rgba(148,163,184,0.75)", marginBottom: 12 }}>
-                    or click to browse from device
+                    or click to select one or multiple files
                   </p>
 
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
@@ -327,24 +359,29 @@ export default function InspectPage() {
               )}
             </div>
 
-            {/* file chip */}
-            {file && (
+            {/* file chip(s) */}
+            {files.length > 0 && (
               <div
                 style={{
                   ...CARD,
                   padding: "8px 12px",
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   flexShrink: 0,
+                  gap: 8,
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 11, color: "rgba(226,232,240,0.95)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>
-                    {file.name}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, color: "rgba(226,232,240,0.95)", marginBottom: 4 }}>
+                    {files.length} file{files.length !== 1 ? "s" : ""} selected
                   </div>
-                  <div style={{ fontSize: 10, color: "rgba(148,163,184,0.80)", marginTop: 1 }}>
-                    {(file.size / 1_000_000).toFixed(2)} MB · {file.type || "media"}
+                  <div style={{ fontSize: 10, color: "rgba(148,163,184,0.80)", maxHeight: 60, overflowY: "auto" }}>
+                    {files.map((f, i) => (
+                      <div key={i} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {i + 1}. {f.name}
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <button
@@ -363,7 +400,7 @@ export default function InspectPage() {
                     flexShrink: 0,
                   }}
                 >
-                  Remove
+                  Clear all
                 </button>
               </div>
             )}
@@ -375,7 +412,9 @@ export default function InspectPage() {
                   <div style={{ width: `${progress}%`, height: "100%", background: "linear-gradient(90deg, #38bdf8, #818cf8)", transition: "width 0.18s ease-out" }} />
                 </div>
                 <p style={{ fontSize: 10, color: "rgba(191,219,254,0.85)" }}>
-                  {stage === "uploading" ? "Uploading footage to NautiCAI…" : "Running YOLOv8 hull model…"}
+                  {stage === "uploading"
+                    ? `Processing image ${currentFileIndex} of ${files.length}…`
+                    : "Running YOLOv8 hull model…"}
                 </p>
               </div>
             )}

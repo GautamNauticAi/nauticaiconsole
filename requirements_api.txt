@@ -8,3 +8,5 @@ numpy
 psycopg2-binary
 PyJWT
 httpx
+torch
+torchvision

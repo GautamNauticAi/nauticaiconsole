@@ -57,6 +57,11 @@ export interface DashboardStats {
   avg_risk_score: number;
 }
 
+export interface SpeciesPrediction {
+  class_name: string;
+  confidence: number;
+}
+
 export interface DetectionBox {
   class_name: string;
   confidence: number;
@@ -64,6 +69,8 @@ export interface DetectionBox {
   y1: number;
   x2: number;
   y2: number;
+  /** Species identified within this detection (e.g. for biofouling: Barnacles, Algae). */
+  species?: SpeciesPrediction[];
 }
 
 export interface DetectionSummary {
@@ -83,6 +90,8 @@ export interface ModelMetrics {
 
 export interface DetectResponse {
   inspection_id: string;
+  /** Original filename from upload; present when returned by /detect */
+  file_name?: string | null;
   detections: DetectionBox[];
   annotated_image: string; // base64 data URI
   summary: DetectionSummary;

@@ -6,6 +6,8 @@ node_modules/
 dist/
 out/
 
+NautiCAI_AgenticAI/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

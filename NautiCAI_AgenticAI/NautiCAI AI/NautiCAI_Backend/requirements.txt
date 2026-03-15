@@ -1,0 +1,21 @@
+# NautiCAI Backend Dependencies
+# Install all with: pip install -r requirements.txt
+
+# Core
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
+# AI Vision
+torch
+ultralytics
+opencv-python
+numpy
+git+https://github.com/facebookresearch/segment-anything.git
+
+# PDF Generation
+fpdf==1.7.2
+
+# Telegram Bot
+python-telegram-bot==20.7
+nest-asyncio==1.5.8

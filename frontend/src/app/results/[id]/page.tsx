@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { PageShell } from "@/components/PageShell";
+import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { api } from "@/lib/api";
 import type {
   Anomaly,
@@ -40,9 +41,9 @@ function RiskGauge({ score }: { score: number }) {
   const pct = (score / 10) * 100;
   const color = score >= 8 ? "#dc2626" : score >= 5 ? "#f59e0b" : "#10b981";
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-      <div style={{ position: "relative", width: 110, height: 110 }}>
-        <svg viewBox="0 0 120 120" style={{ width: 110, height: 110, transform: "rotate(-90deg)" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      <div style={{ position: "relative", width: 80, height: 80 }}>
+        <svg viewBox="0 0 120 120" style={{ width: 80, height: 80, transform: "rotate(-90deg)" }}>
           <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="10" />
           <circle cx="60" cy="60" r="50" fill="none" stroke={color} strokeWidth="10"
             strokeDasharray={`${pct * 3.14} 314`}
@@ -53,14 +54,14 @@ function RiskGauge({ score }: { score: number }) {
           position: "absolute", inset: 0,
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         }}>
-          <span style={{ fontSize: "1.6rem", fontWeight: 800, color, lineHeight: 1 }}>{score.toFixed(1)}</span>
-          <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(186,230,255,0.50)", letterSpacing: "0.1em", textTransform: "uppercase" }}>/ 10</span>
+          <span style={{ fontSize: "1.25rem", fontWeight: 800, color, lineHeight: 1 }}>{score.toFixed(1)}</span>
+          <span style={{ fontSize: 8, fontWeight: 700, color: "rgba(186,230,255,0.50)", letterSpacing: "0.08em", textTransform: "uppercase" }}>/ 10</span>
         </div>
       </div>
       <span style={{
-        fontSize: 11, fontWeight: 700, color,
+        fontSize: 10, fontWeight: 700, color,
         background: `${color}18`, border: `1px solid ${color}44`,
-        borderRadius: 999, padding: "3px 12px",
+        borderRadius: 999, padding: "2px 10px",
       }}>
         {score >= 8 ? "Critical Risk" : score >= 5 ? "High Risk" : "Low Risk"}
       </span>
@@ -108,52 +109,72 @@ export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const [liveDetect, setLiveDetect] = useState<DetectResponse | null>(null);
+  const [liveBatch, setLiveBatch] = useState<DetectResponse[] | null>(null);
+  const [batchIndex, setBatchIndex] = useState(0);
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [hullRegion, setHullRegion] = useState("");
+  const [shellThickness, setShellThickness] = useState("");
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
 
   const fromLive = searchParams.get("source") === "live";
+  const isBatch = searchParams.get("batch") === "1";
 
   useEffect(() => {
     if (!id) return;
 
     if (fromLive && typeof window !== "undefined") {
-      const raw = sessionStorage.getItem("nauticai:lastInspection");
-      if (raw) {
-        try {
-          const parsed: DetectResponse = JSON.parse(raw);
-          if (parsed.inspection_id === id) {
-            setLiveDetect(parsed);
+      if (isBatch) {
+        const raw = sessionStorage.getItem("nauticai:lastInspectionBatch");
+        if (raw) {
+          try {
+            const batch: DetectResponse[] = JSON.parse(raw);
+            if (Array.isArray(batch) && batch.length > 0 && batch[0].inspection_id === id) {
+              setLiveBatch(batch);
+              setBatchIndex(0);
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore parse errors
+        }
+      } else {
+        const raw = sessionStorage.getItem("nauticai:lastInspection");
+        if (raw) {
+          try {
+            const parsed: DetectResponse = JSON.parse(raw);
+            if (parsed.inspection_id === id) setLiveDetect(parsed);
+          } catch {
+            // ignore
+          }
         }
       }
     }
 
-    // Always try to load inspection metadata from backend for header + stats
     api
       .getInspection(id)
       .then((ins) => {
         if (ins) setInspection(ins);
       })
-      .catch(() => {
-        /* backend might be offline; ok to skip, page still shows live data */
-      });
-  }, [fromLive, id]);
+      .catch(() => {});
+  }, [fromLive, id, isBatch]);
+
+  const currentLive = liveBatch?.length
+    ? (liveBatch[batchIndex] ?? liveBatch[0])
+    : liveDetect;
 
   const criticalCount = 0;
   const highCount = 0;
 
   const annotatedSrc =
-    liveDetect?.annotated_image || inspection?.annotated_image_url || null;
+    currentLive?.annotated_image || inspection?.annotated_image_url || null;
 
   const anomalies = inspection?.anomalies ?? [];
-  const detections = liveDetect?.detections ?? [];
+  const detections = currentLive?.detections ?? [];
 
   const effectiveRiskScore = (() => {
     if (typeof inspection?.risk_score === "number") {
       return inspection.risk_score;
     }
-    const level = liveDetect?.summary.risk_level;
+    const level = currentLive?.summary.risk_level;
     if (!level) return 0;
     switch (level) {
       case "HIGH":
@@ -171,26 +192,31 @@ export default function ResultsPage() {
 
   return (
     <PageShell>
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 48px" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 28px", minHeight: "100vh", boxSizing: "border-box", display: "flex", flexDirection: "column" }}>
 
-        {/* Header */}
-        <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        {/* Header – compact */}
+        <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
               <Link href="/dashboard" style={{ fontSize: 12, color: "rgba(186,230,255,0.65)", textDecoration: "none" }}>← Dashboard</Link>
               <span style={{ color: "rgba(255,255,255,0.18)" }}>/</span>
               <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)" }}>Results</span>
             </div>
-            <h1 style={{ fontSize: "1.9rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-              {inspection?.file_name ?? "Hull inspection results"}
+            <h1 style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+              {inspection?.file_name ?? (currentLive ? api.inspectionFromDetectResponse(currentLive).file_name : null) ?? "Hull inspection results"}
             </h1>
-            {inspection && (
+            {(inspection || currentLive) && (
               <p style={{ fontSize: 12, color: "rgba(226,238,255,0.72)", marginTop: 6 }}>
                 Inspection ID:{" "}
                 <span style={{ fontFamily: "monospace" }}>
-                  {inspection.inspection_id}
-                </span>{" "}
-                · {new Date(inspection.created_at).toLocaleString()}
+                  {inspection?.inspection_id ?? currentLive?.inspection_id}
+                </span>
+                {liveBatch && liveBatch.length > 1 && (
+                  <span style={{ marginLeft: 8, color: "rgba(186,230,255,0.7)" }}>
+                    · Image {batchIndex + 1} of {liveBatch.length} in this run
+                  </span>
+                )}{" "}
+                · {new Date((inspection?.created_at ?? currentLive?.timestamp) ?? "").toLocaleString()}
               </p>
             )}
           </div>
@@ -199,8 +225,8 @@ export default function ResultsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const ins = inspection ?? (liveDetect ? api.inspectionFromDetectResponse(liveDetect) : null);
-                  if (ins) api.exportReportPdf(ins, liveDetect?.annotated_image ?? undefined);
+                  const ins = inspection ?? (currentLive ? api.inspectionFromDetectResponse(currentLive) : null);
+                  if (ins) api.exportReportPdf(ins, currentLive?.annotated_image ?? undefined);
                 }}
                 style={{
                   fontSize: 13,
@@ -227,96 +253,148 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        {/* Summary strip */}
+        {/* Summary – 3 clear cards for clients */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(5, 1fr)",
-            gap: 12,
-            marginBottom: 24,
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 16,
+            marginBottom: 20,
+            flexShrink: 0,
           }}
         >
           {[
             {
-              label: "Detections",
-              value: liveDetect?.summary.total ?? inspection?.detected_classes?.length ?? 0,
-              color: "#f59e0b",
-            },
-            { label: "Critical", value: criticalCount, color: "#dc2626" },
-            { label: "High Risk", value: highCount, color: "#ef4444" },
-            {
-              label: "Risk level",
-              value: liveDetect?.summary.risk_level ?? inspection?.risk_level ?? "—",
-              color: "#e5e7eb",
+              label: "Findings",
+              value: currentLive?.summary.total ?? inspection?.detected_classes?.length ?? 0,
+              sub: "items detected",
+              color: "#e2e8f0",
             },
             {
-              label: "File",
-              value: inspection?.file_name ?? "—",
+              label: "Risk",
+              value: currentLive?.summary.risk_level ?? inspection?.risk_level ?? "—",
+              sub: "overall level",
+              color: "#e2e8f0",
+            },
+            {
+              label: "Inspection",
+              value: inspection?.file_name ?? (currentLive ? api.inspectionFromDetectResponse(currentLive).file_name : null) ?? "—",
+              sub: null,
               color: "#94a3b8",
             },
           ].map((s) => (
             <div
               key={s.label}
               style={{
-                background: "rgba(5,5,20,0.80)",
-                border: "1px solid rgba(148,163,184,0.40)",
+                background: "rgba(15,23,42,0.6)",
+                border: "1px solid rgba(148,163,184,0.25)",
                 borderRadius: 12,
                 padding: "14px 16px",
               }}
             >
               <p
                 style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "rgba(186,230,255,0.55)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.09em",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(226,232,240,0.7)",
                   marginBottom: 4,
+                  letterSpacing: "0.01em",
                 }}
               >
                 {s.label}
               </p>
               <p
                 style={{
-                  fontSize: 16,
-                  fontWeight: 800,
+                  fontSize: 15,
+                  fontWeight: 600,
                   color: s.color,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
+                  lineHeight: 1.3,
                 }}
               >
                 {s.value}
               </p>
+              {s.sub && (
+                <p style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginTop: 2 }}>{s.sub}</p>
+              )}
             </div>
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.35fr 0.9fr", gap: 20 }}>
-
-          {/* Annotated image */}
+        <div style={{ display: "grid", gridTemplateColumns: "1.35fr 0.9fr", gap: 12, flex: 1, minHeight: 0 }}>
+          {/* Annotated image – scaled to fit, click to open dialog */}
           <div style={{
             background: "rgba(5,5,20,0.78)", border: "1px solid rgba(148,163,184,0.40)",
-            borderRadius: 16, overflow: "hidden",
+            borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0,
           }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(148,163,184,0.45)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>Annotated hull image</span>
-              <span style={{ fontSize: 11, color: "rgba(186,230,255,0.65)" }}>Bounding boxes for each detected anomaly</span>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(148,163,184,0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0", letterSpacing: "0.01em" }}>Detection result</span>
+              <span style={{ fontSize: 12, color: "rgba(186,230,255,0.65)" }}>
+                {liveBatch && liveBatch.length > 1 ? `Image ${batchIndex + 1} of ${liveBatch.length}` : "Click to enlarge"}
+              </span>
             </div>
-            <div style={{ padding: 20, position: "relative" }}>
+            <div style={{ padding: 10, position: "relative", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {annotatedSrc ? (
-                <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", background: "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.26), transparent 60%), radial-gradient(circle at 80% 100%, rgba(59,130,246,0.42), transparent 60%)" }}>
-                  {liveDetect ? (
-                    // For live detections we receive a data URI, use a plain img tag
+                <>
+                  {liveBatch && liveBatch.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setBatchIndex((i) => (i <= 0 ? liveBatch.length - 1 : i - 1))}
+                      aria-label="Previous image"
+                      style={{
+                        position: "absolute",
+                        left: 14,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        zIndex: 2,
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        background: "rgba(30,41,59,0.95)",
+                        border: "1px solid #475569",
+                        color: "#e2e8f0",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 18,
+                      }}
+                    >
+                      ‹
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setImageViewerOpen(true)}
+                    style={{
+                      position: "relative",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      background: "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.2), transparent 60%)",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      maxHeight: "min(42vh, 320px)",
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                  {currentLive ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={annotatedSrc}
                       alt="Annotated hull"
                       style={{
-                        width: "100%",
-                        height: "auto",
+                        maxHeight: "min(42vh, 320px)",
+                        width: "auto",
+                        maxWidth: "100%",
+                        objectFit: "contain",
                         display: "block",
-                        borderRadius: 10,
+                        borderRadius: 8,
                       }}
                     />
                   ) : (
@@ -326,14 +404,14 @@ export default function ResultsPage() {
                       width={800}
                       height={500}
                       style={{
-                        width: "100%",
-                        height: "auto",
-                        display: "block",
-                        borderRadius: 10,
+                        maxHeight: "min(42vh, 320px)",
+                        width: "auto",
+                        maxWidth: "100%",
+                        objectFit: "contain",
+                        borderRadius: 8,
                       }}
                     />
                   )}
-                  {/* Overlay bounding boxes when structured anomalies are available */}
                   {anomalies.length > 0 && (
                     <svg
                       style={{
@@ -342,6 +420,7 @@ export default function ResultsPage() {
                         width: "100%",
                         height: "100%",
                         pointerEvents: "none",
+                        borderRadius: 8,
                       }}
                     >
                       {anomalies.map((a) => {
@@ -380,59 +459,152 @@ export default function ResultsPage() {
                       })}
                     </svg>
                   )}
-                </div>
+                </button>
+                  {liveBatch && liveBatch.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setBatchIndex((i) => (i >= liveBatch.length - 1 ? 0 : i + 1))}
+                      aria-label="Next image"
+                      style={{
+                        position: "absolute",
+                        right: 14,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        zIndex: 2,
+                        width: 36,
+                        height: 36,
+                        borderRadius: "50%",
+                        background: "rgba(30,41,59,0.95)",
+                        border: "1px solid #475569",
+                        color: "#e2e8f0",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 18,
+                      }}
+                    >
+                      ›
+                    </button>
+                  )}
+                </>
               ) : (
                 <div
                   style={{
-                    height: 300,
-                    borderRadius: 14,
+                    height: "min(42vh, 280px)",
+                    borderRadius: 10,
                     background: "rgba(15,23,42,0.90)",
                     border: "1px dashed rgba(148,163,184,0.60)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     color: "rgba(186,230,255,0.75)",
-                    fontSize: 13,
+                    fontSize: 12,
                     textAlign: "center",
-                    padding: "0 24px",
+                    padding: "0 16px",
                   }}
                 >
-                  Annotated hull image will appear here once the detection API
-                  returns overlays for this inspection.
+                  Annotated image will appear here once detection returns.
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Right panel – compact */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
 
-            {/* Risk gauge */}
+            {/* UWILD NDT Sensor Inputs */}
             <div
               style={{
                 background: "rgba(5,5,20,0.80)",
                 border: "1px solid rgba(148,163,184,0.45)",
-                borderRadius: 16,
-                padding: "20px",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
+                borderRadius: 12,
+                padding: "10px 14px",
+                flexShrink: 0,
               }}
             >
               <span
                 style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "rgba(186,230,255,0.50)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.09em",
-                  marginBottom: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#e2e8f0",
+                  display: "block",
+                  marginBottom: 12,
+                  letterSpacing: "0.01em",
                 }}
               >
-                Risk Score
+                Add details (optional)
               </span>
-              {(liveDetect || inspection) ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
+                    Area
+                  </label>
+                  <input
+                    type="text"
+                    value={hullRegion}
+                    onChange={(e) => setHullRegion(e.target.value)}
+                    placeholder="e.g. Aft starboard"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      background: "rgba(15,23,42,0.9)",
+                      border: "1px solid rgba(148,163,184,0.45)",
+                      borderRadius: 8,
+                      color: "#e2eeff",
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
+                    Shell thickness (mm)
+                  </label>
+                  <input
+                    type="text"
+                    value={shellThickness}
+                    onChange={(e) => setShellThickness(e.target.value)}
+                    placeholder="e.g. 12"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      background: "rgba(15,23,42,0.9)",
+                      border: "1px solid rgba(148,163,184,0.45)",
+                      borderRadius: 8,
+                      color: "#e2eeff",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Risk */}
+            <div
+              style={{
+                background: "rgba(15,23,42,0.6)",
+                border: "1px solid rgba(148,163,184,0.25)",
+                borderRadius: 12,
+                padding: "16px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#e2e8f0",
+                  marginBottom: 4,
+                  letterSpacing: "0.01em",
+                }}
+              >
+                Risk level
+              </span>
+              {(currentLive || inspection) ? (
                 <RiskGauge score={effectiveRiskScore} />
               ) : (
                 <span
@@ -446,93 +618,110 @@ export default function ResultsPage() {
               )}
             </div>
 
-            {/* Anomaly list */}
+            {/* What we found – client-friendly list */}
             <div
               style={{
-                background: "rgba(5,5,20,0.80)",
-                border: "1px solid rgba(148,163,184,0.45)",
-                borderRadius: 16,
-                padding: "16px 18px",
+                background: "rgba(15,23,42,0.6)",
+                border: "1px solid rgba(148,163,184,0.25)",
+                borderRadius: 12,
+                padding: "14px 16px",
                 flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               <span
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#e2e8f0",
                   display: "block",
-                  marginBottom: 14,
+                  marginBottom: 12,
+                  letterSpacing: "0.01em",
                 }}
               >
-                Detected Anomalies
+                What we found
               </span>
 
+              <div
+                style={{
+                  maxHeight: "min(220px, 28vh)",
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  paddingRight: 4,
+                }}
+              >
               {anomalies.length > 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {anomalies.map((a) => (
-                    <AnomalyCard key={a.id} a={a} />
-                  ))}
-                </div>
-              ) : detections.length > 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  {detections.map((d, idx) => (
                     <div
-                      key={idx}
+                      key={a.id}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        background: "rgba(15,23,42,0.85)",
-                        border: "1px solid rgba(148,163,184,0.45)",
-                        fontSize: 12,
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        background: "rgba(30,41,59,0.5)",
+                        border: "1px solid rgba(148,163,184,0.2)",
                       }}
                     >
-                      <span style={{ color: "rgba(226,238,255,0.9)" }}>
-                        {d.class_name}
-                      </span>
-                      <span
-                        style={{
-                          fontFamily: "monospace",
-                          color: "rgba(186,230,255,0.8)",
-                        }}
-                      >
-                        {(d.confidence * 100).toFixed(1)}%
-                      </span>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0", textTransform: "capitalize" }}>
+                        {a.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
+                        {a.severity} severity
+                      </div>
                     </div>
                   ))}
                 </div>
+              ) : detections.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {detections.map((d, idx) => {
+                    const speciesLine = d.species?.length
+                      ? d.species.map((s) => s.class_name).join(", ")
+                      : null;
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 10,
+                          background: "rgba(30,41,59,0.5)",
+                          border: "1px solid rgba(148,163,184,0.2)",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0", textTransform: "capitalize" }}>
+                          {d.class_name}
+                        </div>
+                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
+                          {speciesLine ? `Species: ${speciesLine}` : "Detected"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
-                <div style={{ textAlign: "center", padding: "24px 0" }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      color: "rgba(186,230,255,0.55)",
-                    }}
-                  >
-                    No anomalies detected
+                <div style={{ textAlign: "center", padding: "28px 0" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
+                  <p style={{ fontSize: 14, color: "rgba(226,232,240,0.7)" }}>
+                    No issues detected
                   </p>
                 </div>
               )}
+              </div>
             </div>
 
           </div>
         </div>
       </div>
+
+      {imageViewerOpen && (liveBatch?.length ? liveBatch.map((r) => r.annotated_image) : annotatedSrc ? [annotatedSrc] : []).length > 0 && (
+        <ImageViewerModal
+          images={liveBatch?.length ? liveBatch.map((r) => r.annotated_image) : [annotatedSrc!]}
+          initialIndex={liveBatch?.length ? batchIndex : 0}
+          title="Annotated output"
+          onClose={() => setImageViewerOpen(false)}
+        />
+      )}
     </PageShell>
   );
 }

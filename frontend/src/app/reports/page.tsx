@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
+import { PdfViewerModal } from "@/components/PdfViewerModal";
 import { api } from "@/lib/api";
 import type { Inspection, Severity } from "@/types";
 
@@ -42,15 +43,48 @@ export default function ReportsPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortBy, setSortBy] = useState<"date" | "risk">("date");
-  const [hoverNew, setHoverNew] = useState(false);
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewingPdf, setViewingPdf] = useState<Inspection | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const refreshList = useCallback((forceRefresh = false) => {
+    api.listInspections(forceRefresh).then(setInspections).catch(() => setInspections([]));
+  }, []);
+
+  const handleDelete = useCallback(
+    async (ins: Inspection) => {
+      const id = String(ins.id);
+      if (!id) return;
+      if (!confirm("Remove this inspection from reports? This cannot be undone.")) return;
+      setDeletingId(id);
+      try {
+        await api.deleteInspection(id);
+        setInspections((prev) => prev.filter((i) => String(i.id) !== id));
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Failed to delete");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = window.localStorage.getItem("nauticai:token");
     if (!token) router.replace("/login");
   }, [router]);
+
+  // Refetch when user returns to this tab so data is fresh after new inspection or remove elsewhere
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshList(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [refreshList]);
 
   useEffect(() => {
     let active = true;
@@ -87,268 +121,223 @@ export default function ReportsPage() {
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 48px" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
           <div>
-            <h1 style={{ fontSize: "1.75rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 4 }}>Reports</h1>
-            <p style={{ fontSize: 13, color: "rgba(186,230,255,0.55)" }}>Full inspection history — filter, sort and export</p>
+            <h1 style={{ fontSize: "1.5rem", fontWeight: 600, color: "#f1f5f9", marginBottom: 4 }}>Reports</h1>
+            <p style={{ fontSize: 13, color: "#64748b" }}>Inspection history — filter, sort, export</p>
           </div>
           <Link
             href="/inspect"
-            onMouseEnter={() => setHoverNew(true)}
-            onMouseLeave={() => setHoverNew(false)}
             style={{
               fontSize: 13,
               fontWeight: 700,
-              color: hoverNew ? "#f9fafb" : "#020617",
-              background: hoverNew ? "rgba(15,23,42,0.98)" : "#f9fafb",
+              color: "#0d0422",
+              background: "#fff",
               borderRadius: 999,
-              padding: "9px 22px",
+              padding: "8px 20px",
               textDecoration: "none",
-              border: hoverNew
-                ? "1px solid rgba(148,163,184,0.55)"
-                : "1px solid rgba(148,163,184,0.25)",
-              boxShadow: hoverNew
-                ? "0 0 0 1px rgba(15,23,42,0.9)"
-                : "0 4px 20px rgba(15,23,42,0.65)",
-              transition: "all 0.16s ease",
+              transition: "background 0.2s ease, color 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#0d0422";
+              e.currentTarget.style.color = "#fff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#fff";
+              e.currentTarget.style.color = "#0d0422";
             }}
           >
-            + New Inspection
+            New inspection
           </Link>
         </div>
 
         {/* Filters bar */}
         <div style={{
-          display: "flex", gap: 12, alignItems: "center", marginBottom: 20,
-          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 12, padding: "12px 16px",
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          marginBottom: 20,
+          background: "#1e293b",
+          border: "1px solid #334155",
+          borderRadius: 8,
+          padding: "12px 16px",
         }}>
-          {/* Search */}
-          <div style={{ position: "relative", flex: 1 }}>
-            <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(186,230,255,0.40)" strokeWidth={2}>
+          <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
+            <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth={2}>
               <circle cx="11" cy="11" r="8" /><path strokeLinecap="round" d="M21 21l-4.35-4.35" />
             </svg>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search vessel or file…"
+              placeholder="Search vessel or file"
               style={{
-                width: "100%", paddingLeft: 32, paddingRight: 12, paddingTop: 7, paddingBottom: 7,
-                fontSize: 13, fontFamily: "inherit",
-                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)",
-                borderRadius: 8, color: "#fff", outline: "none",
+                width: "100%",
+                paddingLeft: 32,
+                paddingRight: 12,
+                paddingTop: 8,
+                paddingBottom: 8,
+                fontSize: 13,
+                fontFamily: "inherit",
+                background: "#0f172a",
+                border: "1px solid #334155",
+                borderRadius: 6,
+                color: "#e2e8f0",
+                outline: "none",
               }}
             />
           </div>
-
-          {/* Status filter */}
           {["all", "completed", "processing", "failed"].map((s) => (
-            <button key={s} onClick={() => setFilterStatus(s)} style={{
-              fontSize: 12, fontWeight: 600,
-              color: filterStatus === s ? "#fff" : "rgba(186,230,255,0.55)",
-              background: filterStatus === s ? "rgba(124,58,237,0.30)" : "transparent",
-              border: filterStatus === s ? "1px solid rgba(124,58,237,0.45)" : "1px solid transparent",
-              borderRadius: 8, padding: "6px 14px", cursor: "pointer",
-              textTransform: "capitalize", transition: "all 0.15s",
-            }}>{s}</button>
-          ))}
-
-          {/* Sort */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-            <span style={{ fontSize: 11, color: "rgba(186,230,255,0.45)" }}>Sort:</span>
-            {(["date", "risk"] as const).map((s) => (
-              <button key={s} onClick={() => setSortBy(s)} style={{
-                fontSize: 12, fontWeight: 600,
-                color: sortBy === s ? "#a78bfa" : "rgba(186,230,255,0.50)",
-                background: "transparent", border: "none", cursor: "pointer",
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: filterStatus === s ? "#f1f5f9" : "#94a3b8",
+                background: filterStatus === s ? "#334155" : "transparent",
+                border: "1px solid #334155",
+                borderRadius: 6,
+                padding: "6px 12px",
+                cursor: "pointer",
                 textTransform: "capitalize",
-              }}>{s}</button>
+              }}
+            >
+              {s}
+            </button>
+          ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Sort:</span>
+            {(["date", "risk"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: sortBy === s ? "#f1f5f9" : "#94a3b8",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  textTransform: "capitalize",
+                }}
+              >
+                {s}
+              </button>
             ))}
           </div>
         </div>
 
         {/* Table */}
         <div style={{
-          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 16, overflow: "hidden",
+          background: "#1e293b",
+          border: "1px solid #334155",
+          borderRadius: 8,
+          overflow: "hidden",
         }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                {["Vessel", "File", "Date", "Anomalies", "Max Severity", "Risk Score", "Status", "Actions"].map((h) => (
-                  <th key={h} style={{
-                    padding: "12px 20px", textAlign: "left",
-                    fontSize: 11, fontWeight: 600, color: "rgba(186,230,255,0.42)",
-                    letterSpacing: "0.08em", textTransform: "uppercase",
-                  }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={8} style={{ padding: "48px 20px", textAlign: "center", color: "rgba(186,230,255,0.5)", fontSize: 13 }}>
-                    Loading inspections…
-                  </td>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 800 }}>
+              <colgroup>
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "18%" }} />
+              </colgroup>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #334155", background: "#0f172a" }}>
+                  {["Vessel", "File", "Date", "Anomalies", "Severity", "Risk", "Status", "Actions"].map((h) => (
+                    <th key={h} style={{
+                      padding: "12px 16px",
+                      textAlign: "left",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#64748b",
+                      letterSpacing: "0.02em",
+                    }}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              )}
-              {!loading && filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8} style={{ padding: "48px 20px", textAlign: "center", color: "rgba(186,230,255,0.35)", fontSize: 13 }}>
-                    No inspections match your filters.
-                  </td>
-                </tr>
-              )}
-              {!loading && filtered.map((ins, i) => {
-                const ms = maxSeverity(ins.anomalies ?? []);
-                const msColor = ms ? severityColor[ms] : "#94a3b8";
-                const rowId = ins.inspection_id ?? String(ins.id);
-                return (
-                  <tr key={rowId} style={{
-                    borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                  }}>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{ins.vessel_name ?? "—"}</span>
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)", fontFamily: "monospace" }}>{ins.file_name ?? "—"}</span>
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 12, color: "rgba(186,230,255,0.50)" }}>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "#64748b", fontSize: 13 }}>Loading…</td>
+                  </tr>
+                )}
+                {!loading && filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "#64748b", fontSize: 13 }}>No inspections match your filters.</td>
+                  </tr>
+                )}
+                {!loading && filtered.map((ins, i) => {
+                  const ms = maxSeverity(ins.anomalies ?? []);
+                  const msColor = ms ? severityColor[ms] : "#64748b";
+                  const rowId = ins.inspection_id ?? String(ins.id);
+                  const anyIns = ins as any;
+                  const numericRisk = typeof anyIns.risk_score === "number" ? anyIns.risk_score : anyIns.risk_level === "HIGH" || anyIns.risk_level === "CRITICAL" ? 8.5 : anyIns.risk_level === "MEDIUM" ? 5.5 : anyIns.risk_level === "LOW" ? 3.0 : 1.0;
+                  return (
+                    <tr key={rowId} style={{ borderBottom: i < filtered.length - 1 ? "1px solid #334155" : "none" }}>
+                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
+                        <span style={{ fontSize: 13, color: "#e2e8f0", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.vessel_name ?? undefined}>{ins.vessel_name ?? "—"}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.file_name ?? undefined}>{ins.file_name ?? "—"}</span>
+                      </td>
+                      <td style={{ padding: "12px 16px", fontSize: 12, color: "#94a3b8" }}>
                         {new Date(ins.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: anomalyCount(ins) ? "#f59e0b" : "#10b981" }}>
-                        {anomalyCount(ins)}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      {ms ? (
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, color: msColor,
-                          background: `${msColor}18`, border: `1px solid ${msColor}44`,
-                          borderRadius: 999, padding: "3px 10px", textTransform: "capitalize",
-                        }}>{ms}</span>
-                      ) : <span style={{ color: "rgba(186,230,255,0.30)", fontSize: 12 }}>—</span>}
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      {ins.status === "completed" ? (
-                        (() => {
-                          const anyIns = ins as any;
-                          const numericRisk =
-                            typeof anyIns.risk_score === "number"
-                              ? anyIns.risk_score
-                              : anyIns.risk_level === "HIGH" ||
-                                anyIns.risk_level === "CRITICAL"
-                              ? 8.5
-                              : anyIns.risk_level === "MEDIUM"
-                              ? 5.5
-                              : anyIns.risk_level === "LOW"
-                              ? 3.0
-                              : 1.0;
-                          const color =
-                            numericRisk >= 8 ? "#dc2626" : numericRisk >= 5 ? "#f59e0b" : "#10b981";
-                          return (
-                            <span
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 700,
-                                color,
-                              }}
-                            >
-                              {numericRisk.toFixed(1)}
-                            </span>
-                          );
-                        })()
-                      ) : (
-                        <span style={{ color: "rgba(186,230,255,0.30)", fontSize: 12 }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, textTransform: "capitalize",
-                        color: ins.status === "completed" ? "#10b981" : ins.status === "processing" ? "#f59e0b" : ins.status === "failed" ? "#ef4444" : "#94a3b8",
-                        background: ins.status === "completed" ? "rgba(16,185,129,0.12)" : ins.status === "processing" ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)",
-                        border: `1px solid ${ins.status === "completed" ? "rgba(16,185,129,0.30)" : ins.status === "processing" ? "rgba(245,158,11,0.30)" : "rgba(239,68,68,0.30)"}`,
-                        borderRadius: 999, padding: "3px 10px",
-                      }}>{ins.status}</span>
-                    </td>
-                    <td style={{ padding: "14px 20px" }}>
-                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      </td>
+                      <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{anomalyCount(ins)}</td>
+                      <td style={{ padding: "12px 16px" }}>
+                        {ms ? <span style={{ fontSize: 12, color: msColor, textTransform: "capitalize" }}>{ms}</span> : <span style={{ color: "#64748b", fontSize: 12 }}>—</span>}
+                      </td>
+                      <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 500, color: "#e2e8f0" }}>
+                        {ins.status === "completed" ? numericRisk.toFixed(1) : "—"}
+                      </td>
+                      <td style={{ padding: "12px 16px", fontSize: 12, color: "#94a3b8", textTransform: "capitalize" }}>{ins.status}</td>
+                      <td style={{ padding: "12px 16px" }}>
                         {ins.status === "completed" && (
-                          <>
-                            <Link
-                              href={`/results/${ins.inspection_id ?? ins.id}`}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                minWidth: 72,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "#020617",
-                                textDecoration: "none",
-                                padding: "5px 12px",
-                                borderRadius: 999,
-                                border: "1px solid rgba(148,163,184,0.45)",
-                                background: "#f9fafb",
-                                boxShadow: "0 4px 18px rgba(15,23,42,0.70)",
-                                transition: "all 0.16s ease",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = "rgba(15,23,42,0.98)";
-                                e.currentTarget.style.color = "#f9fafb";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = "#f9fafb";
-                                e.currentTarget.style.color = "#020617";
-                              }}
-                            >
-                              View
-                            </Link>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                             <button
                               type="button"
-                              onClick={() => api.exportReportPdf(ins)}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                minWidth: 72,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "#e5e7eb",
-                                padding: "5px 12px",
-                                borderRadius: 999,
-                                border: "1px solid rgba(148,163,184,0.45)",
-                                background: "rgba(15,23,42,0.96)",
-                                boxShadow: "0 3px 16px rgba(15,23,42,0.75)",
-                                transition: "opacity 0.16s ease",
-                                cursor: "pointer",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.opacity = "0.9";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.opacity = "1";
-                              }}
+                              onClick={() => setViewingPdf(ins)}
+                              style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
                             >
-                              Download PDF
+                              View
                             </button>
-                          </>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(ins)}
+                              disabled={deletingId === String(ins.id)}
+                              style={{ fontSize: 12, fontWeight: 600, color: "#f87171", background: "none", border: "none", cursor: deletingId === String(ins.id) ? "wait" : "pointer", padding: 0 }}
+                            >
+                              {deletingId === String(ins.id) ? "…" : "Remove"}
+                            </button>
+                          </div>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <p style={{ marginTop: 14, fontSize: 11, color: "rgba(186,230,255,0.30)", textAlign: "right" }}>
-          {filtered.length} inspection{filtered.length !== 1 ? "s" : ""} shown
+        <p style={{ marginTop: 12, fontSize: 12, color: "#64748b", textAlign: "right" }}>
+          {filtered.length} inspection{filtered.length !== 1 ? "s" : ""}
         </p>
+
+        {viewingPdf && (
+          <PdfViewerModal
+            inspection={viewingPdf}
+            annotatedImage={null}
+            onClose={() => setViewingPdf(null)}
+          />
+        )}
       </div>
     </PageShell>
   );
