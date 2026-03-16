@@ -336,7 +336,7 @@ export const api = {
 /** Auth: Agentic backend has no auth; these will 404. Kept for compatibility. */
 async function authReq<T>(
   path: string,
-  body: { email: string; password?: string; [k: string]: unknown }
+  body: Record<string, unknown>
 ): Promise<T> {
   const url = `${getBase()}${path}`;
   const res = await fetch(url, {
