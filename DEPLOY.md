@@ -6,6 +6,65 @@ Single backend: **AgenticAI_Backend** (auth, inspect, dashboard, reports, Telegr
 
 ---
 
+## Deploy now (backend + connect everything)
+
+Do these in order. Replace placeholders with your real values.
+
+### 1. Include YOLO model in the build
+
+`biofouling_best.pt` is already in the backend folder; it’s gitignored (`*.pt`) so Cloud Build doesn’t get it. From repo root, add it once and push:
+
+```bash
+git add -f "AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend/biofouling_best.pt"
+git commit -m "Include YOLO model for Cloud Run build"
+```
+
+### 2. Build backend image on Google Cloud
+
+- Push your branch to GitHub (e.g. `main`).
+- **Google Cloud Console** → **Cloud Build** → **History** → **Submit build** (or use your trigger).
+  - **Source:** GitHub, your repo, branch (e.g. `main`).
+  - **Build configuration:** Cloud Build configuration file.
+  - **Location:** Repository; path: **`cloudbuild-api.yaml`** (at repo root).
+- Submit. First build can take **~20–25 min** (torch + segment-anything). Wait until it succeeds.
+
+### 3. Deploy backend to Cloud Run
+
+- **Cloud Run** → **Create Service** (or select existing).
+- **Container:**  
+  - **Image:** `gcr.io/YOUR_GCP_PROJECT_ID/nauticai-api:COMMIT_SHA`  
+  (use the image built in step 2; pick the correct tag from Container Registry).
+- **Port:** `8080`.
+- **Environment variables** (add these):
+
+  | Name | Value |
+  |------|--------|
+  | `POSTGRES_DSN` | Your Neon connection string (from Neon dashboard) |
+  | `JWT_SECRET` | Your production secret (e.g. the 64-char hex you generated) |
+  | `FRONTEND_URL` | Your Vercel app URL (e.g. `https://nauticaiconsole.vercel.app`) |
+
+- Create/Deploy. Copy the **service URL** (e.g. `https://nauticai-api-xxxx.run.app`). This is your **backend URL**.
+
+### 4. Connect frontend (Vercel)
+
+- **Vercel** → your project → **Settings** → **Environment Variables**.
+- Set **`NEXT_PUBLIC_API_URL`** = **backend URL** from step 3 (no trailing slash).
+- **Redeploy** the frontend so the new value is used.
+
+### 5. Connect Telegram bot (Option B)
+
+- **Cloud Run** → open your **Telegram bot** service.
+- **Edit & deploy new revision** → **Variables**:
+  - **`TELEGRAM_VALIDATE_URL`** = **backend URL** from step 3 (e.g. `https://nauticai-api-xxxx.run.app`).
+- Deploy.  
+If the bot isn’t deployed yet: deploy with **Dockerfile.bot**, set **`TELEGRAM_BOT_TOKEN`** and **`TELEGRAM_VALIDATE_URL`** = backend URL, **Minimum instances = 1**.
+
+---
+
+After this: **Frontend (Vercel)** talks to **Backend (Cloud Run)** via `NEXT_PUBLIC_API_URL`. **Bot (Cloud Run)** talks to **Backend** via `TELEGRAM_VALIDATE_URL`. **Backend** uses **Neon** via `POSTGRES_DSN`. All services are connected.
+
+---
+
 ## Backend (required)
 
 - **Location:** `NautiCAI/AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend/`

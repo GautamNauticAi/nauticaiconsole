@@ -6,17 +6,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system deps for OpenCV etc. (libgl1 replaces libgl1-mesa-glx on Debian Bookworm+)
+# Install system deps: OpenCV (libgl1), git (pip clone), curl (download SAM)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 \
+    curl git libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download SAM checkpoint (public URL); avoids committing large .pth to repo.
+RUN mkdir -p sam_checkpoints \
+    && curl -L -o sam_checkpoints/sam_vit_b_01ec64.pth \
+       "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+
 COPY . .
-# Ensure model files exist at runtime or set NAUTICAI_YOLO_PATH / NAUTICAI_SAM_PATH in Cloud Run.
-# Place biofouling_best.pt and sam_checkpoints/sam_vit_b_01ec64.pth in build context if needed.
+# YOLO: ensure biofouling_best.pt is in build context or set NAUTICAI_YOLO_PATH at runtime.
 
 ENV PORT=8000
 EXPOSE 8000

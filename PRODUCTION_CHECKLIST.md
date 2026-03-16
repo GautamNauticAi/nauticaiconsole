@@ -35,14 +35,26 @@ In production the app uses the same-origin proxy (`/api/backend`) so the browser
 
 ---
 
-## 2. Database
+## 2. Backend model files (Cloud Run API)
+
+- **SAM** is downloaded during Docker build (no action needed).
+- **YOLO** (`biofouling_best.pt`) is not in the repo (`.gitignore` has `*.pt`). To have inspections work in production, either:
+  - **Option A:** Add it to the repo once:  
+    `git add -f "AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend/biofouling_best.pt"` then commit and push (so Cloud Build includes it), or  
+  - **Option B:** Add a Cloud Build step that copies the file from a GCS bucket into the backend folder before the Docker build step.
+
+Without `biofouling_best.pt` in the image, the API will start but running an inspection will fail when loading the model.
+
+---
+
+## 3. Database
 
 - Run **Neon** (or Postgres) and apply **`migrations/run_once_neon.sql`** once (users table with `username`, `telegram_user_id`; `agentic_inspections`; indexes).
 - Ensure `POSTGRES_DSN` uses the connection string from your Neon project (or pooler URL if you use one).
 
 ---
 
-## 3. Security
+## 4. Security
 
 - No secrets in code or in repo (use env only).
 - `JWT_SECRET` and `POSTGRES_DSN` are sensitive; set only in Cloud Run / Vercel env.
@@ -50,7 +62,7 @@ In production the app uses the same-origin proxy (`/api/backend`) so the browser
 
 ---
 
-## 4. Speed / performance
+## 5. Speed / performance
 
 - **Backend:** `GET /api/vessels/all` is cached in-memory per user (45s TTL). Cache is invalidated when a new inspection is saved. This reduces repeated DB + file reads.
 - **Frontend:** Inspections list is cached 60s and in-flight requests are deduplicated so dashboard and reports don’t double-fetch.
@@ -58,14 +70,14 @@ In production the app uses the same-origin proxy (`/api/backend`) so the browser
 
 ---
 
-## 5. Health and logs
+## 6. Health and logs
 
 - Backend: `GET /health` returns 200 when the app is up; use it for Cloud Run health checks.
 - Avoid heavy `print()` in production; consider replacing with a small logger if needed.
 
 ---
 
-## 6. Deployment order
+## 7. Deployment order
 
 1. **Neon:** Create DB, run `run_once_neon.sql`.
 2. **Backend API:** Deploy to Cloud Run with env; note the service URL.
@@ -75,7 +87,7 @@ In production the app uses the same-origin proxy (`/api/backend`) so the browser
 
 ---
 
-## 7. Post-deploy checks
+## 8. Post-deploy checks
 
 - [ ] Login and signup work (backend + Neon).
 - [ ] Run an inspection from the dashboard; report and PDF appear.

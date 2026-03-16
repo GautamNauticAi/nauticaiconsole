@@ -1,0 +1,11 @@
+# Keep secrets and cache out of the image
+.env
+.env.*
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.venv
+venv
+.git
+.github

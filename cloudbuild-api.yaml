@@ -1,4 +1,6 @@
 # Backend API image. Use in Cloud Run: Build configuration = "Build configuration file", path = cloudbuild-api.yaml
+# timeout: torch + segment-anything pip install can take 15–25 min
+timeout: '2400s'
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
