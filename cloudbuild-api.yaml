@@ -1,0 +1,12 @@
+# Backend API image. Use in Cloud Run: Build configuration = "Build configuration file", path = cloudbuild-api.yaml
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend/Dockerfile'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/nauticai-api:$COMMIT_SHA'
+      - 'AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend'
+images:
+  - 'gcr.io/$PROJECT_ID/nauticai-api:$COMMIT_SHA'

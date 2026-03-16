@@ -1,0 +1,12 @@
+# Telegram bot image. Use in Cloud Run: Build configuration = "Build configuration file", path = cloudbuild-bot.yaml
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend/Dockerfile.bot'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/nauticai-bot:$COMMIT_SHA'
+      - 'AgenticAI_Backend/NautiCAI AI/NautiCAI_Backend'
+images:
+  - 'gcr.io/$PROJECT_ID/nauticai-bot:$COMMIT_SHA'

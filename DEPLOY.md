@@ -132,3 +132,6 @@ So: **2 services on Google Cloud** (backend + bot), **1 app on Vercel** (fronten
    - In production the frontend uses the same-origin proxy (`/api/backend`); the proxy forwards JSON and binary (e.g. PDF) responses correctly.
 
 **Production checklist:** See **PRODUCTION_CHECKLIST.md** for env vars, DB migration, security, speed tips, and post-deploy checks.
+
+**Deployed URLs (this project)**  
+- **Telegram bot (Cloud Run):** https://nauticaibot-816993186449.europe-west1.run.app (health: returns `ok`)
