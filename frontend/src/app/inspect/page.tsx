@@ -126,14 +126,24 @@ export default function InspectPage() {
     const results: AgenticInspectResponse[] = [];
     let lastError: string | null = null;
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
-    for (let i = 0; i < files.length; i++) {
-      setCurrentFileIndex(i + 1);
-      setProgress(Math.round(((i + 0.5) / total) * 90));
+    if (files.length > 1) {
+      setProgress(50);
       try {
-        const res = await api.upload(files[i], vesselId, i);
-        results.push(res);
+        const batchResults = await api.uploadBatch(Array.from(files), vesselId);
+        results.push(...batchResults);
       } catch (err) {
-        lastError = err instanceof Error ? err.message : "Upload failed";
+        lastError = err instanceof Error ? err.message : "Batch upload failed";
+      }
+    } else {
+      for (let i = 0; i < files.length; i++) {
+        setCurrentFileIndex(i + 1);
+        setProgress(Math.round(((i + 0.5) / total) * 90));
+        try {
+          const res = await api.upload(files[i], vesselId, i);
+          results.push(res);
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : "Upload failed";
+        }
       }
     }
     setProgress(95);

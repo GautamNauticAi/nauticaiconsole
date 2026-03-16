@@ -158,6 +158,32 @@ export const api = {
     return res;
   },
 
+  /** Batch upload: one request with all images so one backend instance has all files (fixes multi-image annotated + PDF on Cloud Run). */
+  async uploadBatch(
+    files: File[],
+    vesselName?: string
+  ): Promise<AgenticInspectResponse[]> {
+    if (files.length === 0) return [];
+    const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
+    const form = new FormData();
+    form.append("vessel_id", vesselId);
+    for (const file of files) {
+      form.append("images", file);
+    }
+    const res = await fetch(`${BASE}/api/inspect/batch`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: form,
+    });
+    invalidateInspectionsCache();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { detail?: string })?.detail ?? `Batch upload failed: ${res.status}`);
+    }
+    const data = (await res.json()) as { reports: AgenticInspectResponse[] };
+    return data.reports ?? [];
+  },
+
   async listInspections(forceRefresh = false): Promise<Inspection[]> {
     return listInspectionsInternal(forceRefresh);
   },
@@ -182,6 +208,18 @@ export const api = {
       );
     } catch {
       return null;
+    }
+  },
+
+  /** Get all reports for a vessel (multi-image). Use so Results page shows slider when opened from Dashboard/Reports. */
+  async getAgenticReportBatch(vesselId: string): Promise<AgenticInspectResponse[]> {
+    try {
+      const data = await req<{ reports: AgenticInspectResponse[] }>(
+        `/api/vessel/${encodeURIComponent(vesselId)}/reports`
+      );
+      return Array.isArray(data?.reports) ? data.reports : [];
+    } catch {
+      return [];
     }
   },
 

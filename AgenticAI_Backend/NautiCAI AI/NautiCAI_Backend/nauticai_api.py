@@ -849,7 +849,109 @@ async def auth_reset_password(payload: ResetPayload):
     return {"ok": True}
 
 
-# Main inspection endpoint (requires auth; stores under reports/{user_id}/ and in inspections table)
+def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> tuple[dict, str | None]:
+    """Run vision pipeline on one image; save per-image JSON and annotated image. Returns (report_payload, dest_annotated_path)."""
+    vision_report = vision_pipeline.process_image(temp_image_path)
+    coverage = vision_report["coverage_percent"]
+    severity = vision_report["severity"]
+    detections = vision_report["detections"]
+    imo_rating, action, requires_cleaning = calculate_imo_rating(coverage)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report_payload = {
+        "metadata": {
+            "vessel_id": vessel_id,
+            "inspection_timestamp": ts,
+            "system_status": "COMPLETED"
+        },
+        "ai_vision_metrics": {
+            "total_hull_coverage_percentage": coverage,
+            "severity": severity,
+            "total_detections": len(detections)
+        },
+        "compliance_result": {
+            "official_imo_rating": imo_rating,
+            "recommended_action": action,
+            "requires_cleaning": requires_cleaning
+        }
+    }
+    annotated_path = vision_report.get("annotated_path")
+    dest_annotated = None
+    if annotated_path and os.path.isfile(annotated_path):
+        if image_index <= 0:
+            dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
+        else:
+            dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated_{image_index}.jpg")
+        shutil.copy2(annotated_path, dest_annotated)
+    per_image_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_{image_index}.json")
+    with open(per_image_path, "w") as f:
+        json.dump(report_payload, f, indent=4)
+    json_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
+    with open(json_path, "w") as f:
+        json.dump(report_payload, f, indent=4)
+    return report_payload, dest_annotated
+
+
+# Batch inspection: all images in one request so one Cloud Run instance has all files (fixes 404 annotated + wrong PDF).
+@app.post("/api/inspect/batch")
+async def run_inspection_batch(
+    vessel_id: str = Form(..., description="Vessel identifier"),
+    images: list[UploadFile] = File(..., description="One or more hull images"),
+    authorization: str | None = Header(None),
+):
+    """Process all images on this instance so annotated images and combined PDF are available."""
+    if not images:
+        raise HTTPException(status_code=400, detail="At least one image required")
+    user = _require_auth(authorization)
+    uid = user["id"]
+    vessel_id = _sanitize_vessel_id(vessel_id)
+    reports_folder = _reports_folder(uid)
+    temp_folder = "temp_uploads"
+    os.makedirs(temp_folder, exist_ok=True)
+    report_payloads: list[dict] = []
+    annotated_paths: list[str | None] = []
+    try:
+        for idx, image in enumerate(images):
+            temp_image_path = os.path.join(temp_folder, image.filename or f"img_{idx}")
+            with open(temp_image_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            payload, ann_path = _process_one_image(temp_image_path, vessel_id, idx, reports_folder)
+            report_payloads.append(payload)
+            annotated_paths.append(ann_path)
+            if os.path.isfile(temp_image_path):
+                os.remove(temp_image_path)
+        if len(report_payloads) > 1:
+            create_combined_pdf(vessel_id, report_payloads, reports_folder, annotated_paths)
+        else:
+            create_pdf(vessel_id, report_payloads[0], reports_folder, annotated_path=annotated_paths[0] if annotated_paths else None)
+        _invalidate_vessels_cache(uid)
+        if POSTGRES_DSN and psycopg2 is not None:
+            try:
+                from datetime import timezone
+                ts_utc = datetime.now(timezone.utc)
+                conn = psycopg2.connect(POSTGRES_DSN)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
+                        (uid, vessel_id, ts_utc, len(images)),
+                    )
+                conn.commit()
+                conn.close()
+            except Exception as db_e:
+                print(f"Inspections insert warning: {db_e}")
+        if telegram_notify:
+            pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
+            try:
+                telegram_notify.send_inspection_result(vessel_id, report_payloads[0], pdf_path)
+            except Exception:
+                pass
+        return JSONResponse(content={"reports": report_payloads})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Main inspection endpoint (single image; for backward compat)
 @app.post("/api/inspect")
 async def run_inspection(
     vessel_id: str = Form(..., description="Vessel identifier"),
@@ -865,55 +967,15 @@ async def run_inspection(
     try:
         temp_folder = "temp_uploads"
         os.makedirs(temp_folder, exist_ok=True)
-        temp_image_path = os.path.join(temp_folder, image.filename)
+        temp_image_path = os.path.join(temp_folder, image.filename or "image")
 
         with open(temp_image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
 
-        vision_report = vision_pipeline.process_image(temp_image_path)
-        coverage   = vision_report["coverage_percent"]
-        severity   = vision_report["severity"]
-        detections = vision_report["detections"]
-        imo_rating, action, requires_cleaning = calculate_imo_rating(coverage)
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        report_payload = {
-            "metadata": {
-                "vessel_id": vessel_id,
-                "inspection_timestamp": ts,
-                "system_status": "COMPLETED"
-            },
-            "ai_vision_metrics": {
-                "total_hull_coverage_percentage": coverage,
-                "severity": severity,
-                "total_detections": len(detections)
-            },
-            "compliance_result": {
-                "official_imo_rating": imo_rating,
-                "recommended_action": action,
-                "requires_cleaning": requires_cleaning
-            }
-        }
-
-        annotated_path = vision_report.get("annotated_path")
-        dest_annotated = None
-        if annotated_path and os.path.isfile(annotated_path):
-            if image_index <= 0:
-                dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
-            else:
-                dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated_{image_index}.jpg")
-            shutil.copy2(annotated_path, dest_annotated)
-
-        json_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
-        with open(json_path, "w") as f:
-            json.dump(report_payload, f, indent=4)
-        per_image_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_{image_index}.json")
-        with open(per_image_path, "w") as f:
-            json.dump(report_payload, f, indent=4)
-
+        report_payload, dest_annotated = _process_one_image(temp_image_path, vessel_id, image_index, reports_folder)
         create_pdf(vessel_id, report_payload, reports_folder, annotated_path=dest_annotated)
         _invalidate_vessels_cache(uid)
 
-        # Record in DB so we can list vessels per user and serve Telegram latest PDF
         if POSTGRES_DSN and psycopg2 is not None:
             try:
                 from datetime import timezone
@@ -936,7 +998,8 @@ async def run_inspection(
             except Exception:
                 pass
 
-        os.remove(temp_image_path)
+        if os.path.isfile(temp_image_path):
+            os.remove(temp_image_path)
         return JSONResponse(content=report_payload)
 
     except HTTPException:
@@ -944,10 +1007,23 @@ async def run_inspection(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Get all report payloads for a vessel (for multi-image slider when opening from Dashboard/Reports)
+@app.get("/api/vessel/{vessel_id}/reports")
+async def get_vessel_reports(vessel_id: str, authorization: str | None = Header(None)):
+    """Returns all per-image reports so the frontend can show the batch slider and correct metrics."""
+    user = _require_auth(authorization)
+    vessel_id = _sanitize_vessel_id(vessel_id)
+    reports_folder = _reports_folder(user["id"])
+    collected = _collect_report_payloads(reports_folder, vessel_id)
+    report_payloads = [p for _, p in collected]
+    return JSONResponse(content={"reports": report_payloads})
+
+
 # Get latest JSON report for a vessel (auth required; only that user's vessel)
 @app.get("/api/vessel/{vessel_id}/latest-report")
 async def get_latest_report(vessel_id: str, authorization: str | None = Header(None)):
     user = _require_auth(authorization)
+    vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
     try:
         json_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
@@ -964,6 +1040,7 @@ async def get_latest_report(vessel_id: str, authorization: str | None = Header(N
 @app.get("/api/vessel/{vessel_id}/annotated-image")
 async def get_annotated_image(vessel_id: str, index: int = 0, authorization: str | None = Header(None)):
     user = _require_auth(authorization)
+    vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
     if index <= 0:
         annotated_path = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
@@ -980,6 +1057,7 @@ async def get_annotated_image(vessel_id: str, index: int = 0, authorization: str
 @app.get("/api/vessel/{vessel_id}/pdf")
 async def download_pdf(vessel_id: str, authorization: str | None = Header(None)):
     user = _require_auth(authorization)
+    vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
     collected = _collect_report_payloads(reports_folder, vessel_id)
     if not collected:

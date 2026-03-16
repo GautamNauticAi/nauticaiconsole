@@ -184,10 +184,25 @@ export default function ResultsPage() {
       }
     }
 
-    api.getAgenticReport(id).then((report) => {
-      if (report) setAgenticReport(report);
+    // When opening from Dashboard/Reports, fetch all reports so multi-image shows slider + correct metrics
+    api.getAgenticReportBatch(id).then((reports) => {
+      if (reports.length > 1) {
+        setAgenticBatch(reports);
+        setAgenticReport(reports[0]);
+      } else if (reports.length === 1) {
+        setAgenticReport(reports[0]);
+      } else {
+        api.getAgenticReport(id).then((report) => {
+          if (report) setAgenticReport(report);
+        }).catch(() => {});
+      }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => {
+      api.getAgenticReport(id).then((report) => {
+        if (report) setAgenticReport(report);
+      }).catch(() => {});
+      setLoading(false);
+    });
   }, [fromLive, id, isBatch]);
 
   const currentReport = agenticBatch?.length
