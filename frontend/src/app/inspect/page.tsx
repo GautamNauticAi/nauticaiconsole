@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
 import { api } from "@/lib/api";
-import type { DetectResponse } from "@/types";
+import type { AgenticInspectResponse } from "@/types";
 
 type Stage = "idle" | "selected" | "uploading" | "processing" | "done" | "error";
 
@@ -78,6 +78,8 @@ export default function InspectPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const useAgentic = process.env.NEXT_PUBLIC_USE_AGENTIC === "1";
+    if (useAgentic) return;
     const token = window.localStorage.getItem("nauticai:token");
     if (!token) router.replace("/login");
   }, [router]);
@@ -121,13 +123,14 @@ export default function InspectPage() {
     setErrMsg("");
     setCurrentFileIndex(0);
     const total = files.length;
-    const results: DetectResponse[] = [];
+    const results: AgenticInspectResponse[] = [];
     let lastError: string | null = null;
+    const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     for (let i = 0; i < files.length; i++) {
       setCurrentFileIndex(i + 1);
       setProgress(Math.round(((i + 0.5) / total) * 90));
       try {
-        const res: DetectResponse = await api.upload(files[i], vesselName || undefined);
+        const res = await api.upload(files[i], vesselId, i);
         results.push(res);
       } catch (err) {
         lastError = err instanceof Error ? err.message : "Upload failed";
@@ -144,10 +147,10 @@ export default function InspectPage() {
     await new Promise((resolve) => setTimeout(resolve, 800));
     setStage("done");
     if (typeof window !== "undefined") {
-      window.sessionStorage.setItem("nauticai:lastInspection", JSON.stringify(results[0]));
-      window.sessionStorage.setItem("nauticai:lastInspectionBatch", JSON.stringify(results));
+      window.sessionStorage.setItem("nauticai:lastAgenticInspection", JSON.stringify(results[0]));
+      window.sessionStorage.setItem("nauticai:lastAgenticInspectionBatch", JSON.stringify(results));
     }
-    const firstId = results[0].inspection_id;
+    const firstId = results[0].metadata.vessel_id;
     const query = results.length > 1 ? "?source=live&batch=1" : "?source=live";
     setTimeout(() => {
       router.push(`/results/${encodeURIComponent(firstId)}${query}`);

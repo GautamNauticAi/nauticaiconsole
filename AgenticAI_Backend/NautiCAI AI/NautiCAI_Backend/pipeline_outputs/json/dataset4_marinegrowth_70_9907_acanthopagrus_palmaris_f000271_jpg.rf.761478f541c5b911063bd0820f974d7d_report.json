@@ -1,0 +1,60 @@
+{
+    "image": "dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d.jpg",
+    "image_path": "temp_uploads\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d.jpg",
+    "image_width": 640,
+    "image_height": 640,
+    "image_area_pixels": 409600,
+    "num_detections": 2,
+    "total_fouling_pixels": 5638,
+    "coverage_percent": 1.3765,
+    "severity": "Low",
+    "annotated_path": "pipeline_outputs\\annotated\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.88,
+            "bbox_xyxy": [
+                145,
+                221,
+                238,
+                286
+            ],
+            "bbox_area_pixels": 6045,
+            "mask_pixels": 3894,
+            "coverage_percent_of_image": 0.9507,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_crop_0.png",
+            "crop_box_xyxy": [
+                146,
+                224,
+                234,
+                285
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.3013,
+            "bbox_xyxy": [
+                87,
+                249,
+                136,
+                302
+            ],
+            "bbox_area_pixels": 2597,
+            "mask_pixels": 1744,
+            "coverage_percent_of_image": 0.4258,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_9907_acanthopagrus_palmaris_f000271_jpg.rf.761478f541c5b911063bd0820f974d7d_crop_1.png",
+            "crop_box_xyxy": [
+                88,
+                254,
+                137,
+                299
+            ]
+        }
+    ]
+}

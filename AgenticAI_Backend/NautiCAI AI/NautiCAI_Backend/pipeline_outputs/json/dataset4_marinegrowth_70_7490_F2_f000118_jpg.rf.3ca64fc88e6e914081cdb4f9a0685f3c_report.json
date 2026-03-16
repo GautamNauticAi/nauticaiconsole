@@ -1,0 +1,82 @@
+{
+    "image": "dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c.jpg",
+    "image_path": "temp_uploads\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c.jpg",
+    "image_width": 640,
+    "image_height": 640,
+    "image_area_pixels": 409600,
+    "num_detections": 3,
+    "total_fouling_pixels": 1007,
+    "coverage_percent": 0.2458,
+    "severity": "Low",
+    "annotated_path": "pipeline_outputs\\annotated\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.6791,
+            "bbox_xyxy": [
+                480,
+                477,
+                511,
+                499
+            ],
+            "bbox_area_pixels": 682,
+            "mask_pixels": 496,
+            "coverage_percent_of_image": 0.1211,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_crop_0.png",
+            "crop_box_xyxy": [
+                479,
+                480,
+                511,
+                498
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.3374,
+            "bbox_xyxy": [
+                90,
+                300,
+                127,
+                316
+            ],
+            "bbox_area_pixels": 592,
+            "mask_pixels": 320,
+            "coverage_percent_of_image": 0.0781,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_crop_1.png",
+            "crop_box_xyxy": [
+                90,
+                303,
+                124,
+                315
+            ]
+        },
+        {
+            "id": 2,
+            "class_name": "biofouling",
+            "confidence": 0.3361,
+            "bbox_xyxy": [
+                91,
+                384,
+                114,
+                400
+            ],
+            "bbox_area_pixels": 368,
+            "mask_pixels": 191,
+            "coverage_percent_of_image": 0.0466,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_mask_2.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_7490_F2_f000118_jpg.rf.3ca64fc88e6e914081cdb4f9a0685f3c_crop_2.png",
+            "crop_box_xyxy": [
+                95,
+                385,
+                111,
+                398
+            ]
+        }
+    ]
+}

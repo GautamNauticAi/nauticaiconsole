@@ -1,10 +1,10 @@
 "use client";
 
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
-import { PdfViewerModal } from "@/components/PdfViewerModal";
+import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
 import { api } from "@/lib/api";
 import type { Inspection, Severity, DashboardStats } from "@/types";
 
@@ -68,20 +68,28 @@ const statusColor: Record<string, string> = {
   failed:     "#ef4444",
 };
 
+/* Match Inspect page card style */
+const CARD_STYLE: React.CSSProperties = {
+  background: "rgba(8, 10, 30, 0.72)",
+  backdropFilter: "blur(18px)",
+  WebkitBackdropFilter: "blur(18px)",
+  borderRadius: 16,
+  border: "1px solid rgba(129, 140, 248, 0.22)",
+  boxShadow: "0 6px 28px rgba(0,0,0,0.50)",
+};
+
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div style={{
-      background: "#1e293b",
-      border: "1px solid #334155",
-      borderRadius: 8,
+      ...CARD_STYLE,
       padding: "20px 22px",
       display: "flex",
       flexDirection: "column",
       gap: 4,
     }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", letterSpacing: "0.02em" }}>{label}</span>
+      <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(186,230,255,0.5)", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</span>
       <span style={{ fontSize: "1.75rem", fontWeight: 700, color: "#f1f5f9", lineHeight: 1.2 }}>{value}</span>
-      {sub && <span style={{ fontSize: 11, color: "#64748b" }}>{sub}</span>}
+      {sub && <span style={{ fontSize: 11, color: "rgba(148,163,184,0.9)" }}>{sub}</span>}
     </div>
   );
 }
@@ -109,8 +117,18 @@ export default function Dashboard() {
   const router = useRouter();
   const [inspections, setInspections] = useState<Inspection[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [viewingPdf, setViewingPdf] = useState<Inspection | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteModalInspection, setDeleteModalInspection] = useState<Inspection | null>(null);
+  const [displayUsername, setDisplayUsername] = useState<string | null>(null);
+  useEffect(() => {
+    setDisplayUsername(window.localStorage.getItem("nauticai:username"));
+    api.getCurrentUser().then((res) => {
+      const un = res.user?.username ?? null;
+      if (un && typeof window !== "undefined") {
+        window.localStorage.setItem("nauticai:username", un);
+        setDisplayUsername(un);
+      }
+    }).catch(() => {});
+  }, []);
 
   const fetchList = useCallback((forceRefresh = false) => {
     api
@@ -119,25 +137,22 @@ export default function Dashboard() {
       .catch(() => setInspections([]));
   }, []);
 
-  const handleDelete = useCallback(async (ins: Inspection) => {
-    const id = String(ins.id);
-    if (!id) return;
-    if (!confirm("Remove this inspection? This cannot be undone.")) return;
-    setDeletingId(id);
-    try {
-      await api.deleteInspection(id);
-      setInspections((prev) => (prev ?? []).filter((i) => String(i.id) !== id));
-      const list = await api.listInspections();
-      setInspections(list);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Failed to delete");
-    } finally {
-      setDeletingId(null);
-    }
+  const openDeleteModal = useCallback((ins: Inspection) => {
+    if (String(ins.id)) setDeleteModalInspection(ins);
   }, []);
 
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteModalInspection) return;
+    const id = String(deleteModalInspection.inspection_id ?? deleteModalInspection.id);
+    await api.deleteInspection(id);
+    setInspections((prev) => (prev ?? []).filter((i) => String(i.inspection_id ?? i.id) !== id));
+  }, [deleteModalInspection]);
+
+  // Agentic backend has no auth; allow access without login when using Agentic
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const useAgentic = process.env.NEXT_PUBLIC_USE_AGENTIC === "1";
+    if (useAgentic) return;
     const token = window.localStorage.getItem("nauticai:token");
     if (!token) router.replace("/login");
   }, [router]);
@@ -212,37 +227,38 @@ export default function Dashboard() {
 
   return (
     <PageShell>
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 48px" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 32px" }}>
 
-        {/* Header */}
-        <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        {/* Header — match Inspect page tone */}
+        <div style={{ marginBottom: 24, display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
           <div>
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 600, color: "#f1f5f9", marginBottom: 4 }}>
-              Overview
-            </h1>
-            <p style={{ fontSize: 13, color: "#64748b" }}>
+            <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.20em", color: "rgba(186,230,255,0.45)", marginBottom: 4 }}>Overview</p>
+            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.1, marginBottom: 4, background: "linear-gradient(90deg, #fff 55%, #a5b4fc)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
               Hull inspection activity
-            </p>
+            </h1>
+            <p style={{ fontSize: 11, color: "rgba(186,230,255,0.55)" }}>Recent inspections and risk summary</p>
           </div>
           <Link
             href="/inspect"
             style={{
               fontSize: 13,
               fontWeight: 700,
-              color: "#0d0422",
-              background: "#fff",
+              color: "#020617",
+              background: "#f9fafb",
               borderRadius: 999,
-              padding: "8px 20px",
+              padding: "10px 24px",
               textDecoration: "none",
+              border: "1px solid rgba(148,163,184,0.45)",
+              boxShadow: "0 4px 22px rgba(15,23,42,0.75)",
               transition: "background 0.2s ease, color 0.2s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#0d0422";
-              e.currentTarget.style.color = "#fff";
+              e.currentTarget.style.background = "rgba(15,23,42,0.98)";
+              e.currentTarget.style.color = "#f9fafb";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#fff";
-              e.currentTarget.style.color = "#0d0422";
+              e.currentTarget.style.background = "#f9fafb";
+              e.currentTarget.style.color = "#020617";
             }}
           >
             New inspection
@@ -250,7 +266,7 @@ export default function Dashboard() {
         </div>
 
         {/* Stat cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           <StatCard label="Total inspections" value={effectiveStats.total_inspections} sub="All time" />
           <StatCard label="High risk" value={effectiveStats.high_risk_count} sub="Score ≥ 8" />
           <StatCard label="Anomalies found" value={effectiveStats.total_anomalies} sub="Across inspections" />
@@ -260,55 +276,51 @@ export default function Dashboard() {
         {/* Main grid */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20 }}>
 
-          {/* Inspections table */}
-          <div style={{
-            background: "#1e293b",
-            border: "1px solid #334155",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}>
+          {/* Inspections table — CARD style, fix date/actions overlap */}
+          <div style={{ ...CARD_STYLE, overflow: "hidden", padding: 0 }}>
             <div style={{
               padding: "16px 20px",
-              borderBottom: "1px solid #334155",
+              borderBottom: "1px solid rgba(129,140,248,0.15)",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
             }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9" }}>Recent inspections</span>
-              <Link href="/reports" style={{ fontSize: 13, color: "#64748b", textDecoration: "none", fontWeight: 500 }}>View all</Link>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(226,232,240,0.96)" }}>Recent inspections</span>
+              <Link href="/reports" style={{ fontSize: 12, color: "rgba(148,163,184,0.9)", textDecoration: "none", fontWeight: 600 }}>View all</Link>
             </div>
 
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 640 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
                 <colgroup>
-                  <col style={{ width: "16%" }} />
-                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "8%" }} />
                   <col style={{ width: "10%" }} />
                   <col style={{ width: "14%" }} />
-                  <col style={{ width: "12%" }} />
-                  <col style={{ width: "14%" }} />
                   <col style={{ width: "10%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "26%", minWidth: 140 }} />
                 </colgroup>
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #334155", background: "#0f172a" }}>
+                  <tr style={{ borderBottom: "1px solid rgba(129,140,248,0.2)", background: "rgba(15,23,42,0.6)" }}>
                     {[
                       { label: "Vessel", align: "left" as const },
-                      { label: "File", align: "left" as const },
+                      { label: "Images", align: "center" as const },
                       { label: "Anomalies", align: "center" as const },
                       { label: "Risk", align: "center" as const },
                       { label: "Status", align: "center" as const },
                       { label: "Date", align: "left" as const },
-                      { label: "", align: "right" as const },
+                      { label: "Actions", align: "right" as const },
                     ].map((col) => (
                       <th
-                        key={col.label || "actions"}
+                        key={col.label}
                         style={{
-                          padding: "12px 16px",
+                          padding: "12px 14px",
                           textAlign: col.align,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: "#64748b",
-                          letterSpacing: "0.03em",
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: "rgba(186,230,255,0.5)",
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
                         }}
                       >
                         {col.label}
@@ -317,33 +329,37 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {effectiveInspections.length === 0 && (
+                  {effectiveInspections.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={7} style={{ padding: "32px 16px", textAlign: "center", color: "#64748b", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
+                      <td colSpan={7} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
                     </tr>
                   )}
-                  {effectiveInspections.map((ins, i) => (
+                  {loading && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "32px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
+                    </tr>
+                  )}
+                  {!loading && effectiveInspections.map((ins, i) => (
                     <tr
                       key={ins.id}
                       style={{
-                        borderBottom: i < effectiveInspections.length - 1 ? "1px solid #334155" : "none",
+                        borderBottom: i < effectiveInspections.length - 1 ? "1px solid rgba(129,140,248,0.12)" : "none",
                       }}
                     >
-                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
-                        <span style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.vessel_name ?? undefined}>{ins.vessel_name ?? "—"}</span>
+                      <td style={{ padding: "12px 14px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <span style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={String(ins.vessel_name ?? ins.inspection_id)}>{ins.vessel_name ?? ins.inspection_id ?? "—"}</span>
                       </td>
-                      <td style={{ padding: "12px 16px", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 0 }}>
-                        <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ins.file_name ?? undefined}>{ins.file_name ?? "—"}</span>
+                      <td style={{ padding: "12px 14px", textAlign: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(191,219,254,0.9)" }}>{(ins as any).image_count ?? 1}</span>
                       </td>
-                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                      <td style={{ padding: "12px 14px", textAlign: "center" }}>
                         {(() => {
                           const anyIns = ins as any;
                           const anomaliesArr = Array.isArray(anyIns.anomalies) ? anyIns.anomalies : Array.isArray(anyIns.detected_classes) ? anyIns.detected_classes : [];
-                          const count = anomaliesArr.length;
-                          return <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{count}</span>;
+                          return <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{anomaliesArr.length}</span>;
                         })()}
                       </td>
-                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                      <td style={{ padding: "12px 14px", textAlign: "center" }}>
                         {ins.status === "completed" ? (
                           (() => {
                             const anyIns = ins as any;
@@ -352,17 +368,18 @@ export default function Dashboard() {
                           })()
                         ) : <span style={{ color: "#64748b", fontSize: 12 }}>—</span>}
                       </td>
-                      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                      <td style={{ padding: "12px 14px", textAlign: "center" }}>
                         <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8", textTransform: "capitalize" }}>{ins.status}</span>
                       </td>
-                      <td style={{ padding: "12px 16px" }}>
+                      <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
                         <span style={{ fontSize: 12, color: "#94a3b8" }}>{new Date(ins.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
                       </td>
-                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                      <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>
                         {ins.status === "completed" && (
-                          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center" }}>
-                            <button type="button" onClick={() => setViewingPdf(ins)} style={{ fontSize: 12, fontWeight: 600, color: "#64748b", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>View</button>
-                            <button type="button" onClick={() => handleDelete(ins)} disabled={deletingId === String(ins.id)} style={{ fontSize: 12, fontWeight: 600, color: "#f87171", background: "none", border: "none", cursor: deletingId === String(ins.id) ? "wait" : "pointer", padding: 0 }}>{deletingId === String(ins.id) ? "…" : "Remove"}</button>
+                          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
+                            <Link href={`/results/${encodeURIComponent(ins.inspection_id)}`} style={{ fontSize: 12, fontWeight: 600, color: "rgba(148,163,184,0.95)", textDecoration: "underline" }}>Results</Link>
+                            <button type="button" onClick={async () => { try { await api.downloadAgenticPdf(ins.inspection_id); } catch { window.alert("Download failed. Make sure you are logged in."); } }} style={{ fontSize: 12, fontWeight: 600, color: "rgba(148,163,184,0.95)", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>PDF</button>
+                            <button type="button" onClick={() => openDeleteModal(ins)} style={{ fontSize: 12, fontWeight: 600, color: "#f87171", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Remove</button>
                           </div>
                         )}
                       </td>
@@ -373,17 +390,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Anomaly breakdown */}
-          <div style={{
-            background: "#1e293b",
-            border: "1px solid #334155",
-            borderRadius: 8,
-            padding: "20px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-          }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9" }}>Anomaly breakdown</span>
+          {/* Anomaly breakdown — CARD style */}
+          <div style={{ ...CARD_STYLE, padding: "20px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(226,232,240,0.96)", borderBottom: "1px solid rgba(129,140,248,0.15)", paddingBottom: 10 }}>Anomaly breakdown</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {anomalyBreakdown.map((a) => (
                 <div key={a.label}>
@@ -391,30 +400,47 @@ export default function Dashboard() {
                     <span style={{ fontSize: 13, color: "#e2e8f0" }}>{a.label}</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#f1f5f9" }}>{a.count}</span>
                   </div>
-                  <div style={{ height: 4, borderRadius: 2, background: "#334155", overflow: "hidden" }}>
+                  <div style={{ height: 4, borderRadius: 2, background: "rgba(51,65,85,0.6)", overflow: "hidden" }}>
                     <div style={{
                       height: "100%",
                       borderRadius: 2,
-                      background: "#64748b",
+                      background: "rgba(129,140,248,0.5)",
                       width: `${totalAnomalies ? (a.count / totalAnomalies) * 100 : 0}%`,
                     }} />
                   </div>
                 </div>
               ))}
             </div>
-            <div style={{ borderTop: "1px solid #334155", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", letterSpacing: "0.02em" }}>Quick actions</span>
-              <Link href="/inspect" style={{ fontSize: 13, color: "#94a3b8", textDecoration: "none", padding: "8px 0" }}>New inspection</Link>
-              <Link href="/reports" style={{ fontSize: 13, color: "#94a3b8", textDecoration: "none", padding: "8px 0" }}>View all reports</Link>
+            <div style={{ borderTop: "1px solid rgba(129,140,248,0.15)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(186,230,255,0.42)", letterSpacing: "0.14em", textTransform: "uppercase" }}>Telegram bot</span>
+              {displayUsername ? (
+                <p style={{ fontSize: 11, color: "rgba(226,232,240,0.9)", margin: 0 }}>
+                  Your username: <code style={{ background: "rgba(15,23,42,0.8)", padding: "2px 6px", borderRadius: 4 }}>{displayUsername}</code>
+                  <br />
+                  <span style={{ fontSize: 10, color: "rgba(148,163,184,0.8)" }}>Enter this in the NautiCAI Inspector bot after /start to get your reports</span>
+                </p>
+              ) : (
+                <p style={{ fontSize: 11, color: "rgba(148,163,184,0.9)", margin: 0 }}>
+                  Log in to see your username for the Telegram bot.
+                </p>
+              )}
+              <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(186,230,255,0.42)", letterSpacing: "0.14em", textTransform: "uppercase", marginTop: 8 }}>Quick actions</span>
+              <Link href="/inspect" style={{ fontSize: 13, color: "rgba(148,163,184,0.9)", textDecoration: "none", padding: "6px 0" }}>New inspection</Link>
+              <Link href="/reports" style={{ fontSize: 13, color: "rgba(148,163,184,0.9)", textDecoration: "none", padding: "6px 0" }}>View all reports</Link>
             </div>
           </div>
 
         </div>
       </div>
 
-      {viewingPdf && (
-        <PdfViewerModal inspection={viewingPdf} annotatedImage={null} onClose={() => setViewingPdf(null)} />
-      )}
+      <DeleteConfirmModal
+        open={!!deleteModalInspection}
+        onClose={() => setDeleteModalInspection(null)}
+        title="Remove inspection?"
+        message="This cannot be undone."
+        vesselLabel={deleteModalInspection ? `Vessel: ${deleteModalInspection.vessel_name ?? deleteModalInspection.inspection_id ?? deleteModalInspection.id}` : undefined}
+        onConfirm={handleDeleteConfirm}
+      />
     </PageShell>
   );
 }

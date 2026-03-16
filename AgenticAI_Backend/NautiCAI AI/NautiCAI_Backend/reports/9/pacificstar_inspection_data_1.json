@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "pacificstar",
+        "inspection_timestamp": "2026-03-16 21:48:55",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 1.3765,
+        "severity": "Low",
+        "total_detections": 2
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-2 (Light Macrofouling)",
+        "recommended_action": "Monitor vessel condition regularly.",
+        "requires_cleaning": false
+    }
+}

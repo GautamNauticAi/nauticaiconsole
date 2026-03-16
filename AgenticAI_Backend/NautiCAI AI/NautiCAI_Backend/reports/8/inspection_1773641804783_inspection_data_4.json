@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "inspection_1773641804783",
+        "inspection_timestamp": "2026-03-16 11:47:36",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 5.2017,
+        "severity": "Medium",
+        "total_detections": 3
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-3 (Medium Macrofouling)",
+        "recommended_action": "ACTION REQUIRED: Schedule cleaning soon.",
+        "requires_cleaning": true
+    }
+}

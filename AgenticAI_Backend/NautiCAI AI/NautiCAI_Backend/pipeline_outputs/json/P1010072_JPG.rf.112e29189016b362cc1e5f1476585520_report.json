@@ -1,0 +1,38 @@
+{
+    "image": "P1010072_JPG.rf.112e29189016b362cc1e5f1476585520.jpg",
+    "image_path": "C:\\Users\\chara\\Documents\\NauticAi_Frontend\\NautiCAI\\AgenticAI_Backend\\NautiCAI AI\\NautiCAI_Backend\\test_images\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520.jpg",
+    "image_width": 224,
+    "image_height": 224,
+    "image_area_pixels": 50176,
+    "num_detections": 1,
+    "total_fouling_pixels": 49723,
+    "coverage_percent": 99.0972,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.9796,
+            "bbox_xyxy": [
+                0,
+                0,
+                224,
+                224
+            ],
+            "bbox_area_pixels": 50176,
+            "mask_pixels": 49723,
+            "coverage_percent_of_image": 99.0972,
+            "mask_path": "pipeline_outputs\\masks\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\P1010072_JPG.rf.112e29189016b362cc1e5f1476585520_crop_0.png",
+            "crop_box_xyxy": [
+                0,
+                0,
+                223,
+                223
+            ]
+        }
+    ]
+}

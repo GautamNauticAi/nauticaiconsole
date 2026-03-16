@@ -4,28 +4,59 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { api, invalidateInspectionsCache } from "@/lib/api";
 
 export function Navbar() {
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [displayUsername, setDisplayUsername] = useState<string | null>(null);
+  const [copyDone, setCopyDone] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = window.localStorage.getItem("nauticai:token");
-    const email = window.localStorage.getItem("nauticai:userEmail");
     setAuthed(!!token);
-    setUserEmail(email);
+    if (!token) {
+      setUserEmail(null);
+      setDisplayUsername(null);
+      return;
+    }
+    setUserEmail(window.localStorage.getItem("nauticai:userEmail"));
+    setDisplayUsername(window.localStorage.getItem("nauticai:username"));
+    api.getCurrentUser().then((res) => {
+      if (res.user?.email && typeof window !== "undefined") {
+        window.localStorage.setItem("nauticai:userEmail", res.user.email);
+        setUserEmail(res.user.email);
+      }
+      const un = res.user?.username ?? null;
+      if (un && typeof window !== "undefined") {
+        window.localStorage.setItem("nauticai:username", un);
+        setDisplayUsername(un);
+      }
+    }).catch(() => {});
   }, []);
 
   const handleLogout = () => {
+    invalidateInspectionsCache();
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("nauticai:token");
       window.localStorage.removeItem("nauticai:userEmail");
+      window.localStorage.removeItem("nauticai:username");
     }
     setAuthed(false);
     setUserEmail(null);
+    setDisplayUsername(null);
     router.push("/login");
+  };
+
+  const copyUsername = () => {
+    if (!displayUsername) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(displayUsername);
+      setCopyDone(true);
+      setTimeout(() => setCopyDone(false), 2000);
+    }
   };
 
   return (
@@ -144,64 +175,55 @@ export function Navbar() {
         )}
       </nav>
 
-      {/* Right actions — auth + contact */}
-      <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      {/* Right actions — minimal: username + copy, log out, contact */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         {authed ? (
           <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "6px 12px",
-                borderRadius: 999,
-                background: "rgba(15,23,42,0.75)",
-                border: "1px solid rgba(148,163,184,0.55)",
-              }}
-            >
-              <span
+            {displayUsername && (
+              <div
                 style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "999px",
-                  background:
-                    "linear-gradient(135deg, rgba(124,58,237,0.9), rgba(59,130,246,0.9))",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 11,
-                  fontWeight: 700,
+                  gap: 6,
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  background: "rgba(15,23,42,0.85)",
+                  border: "1px solid rgba(148,163,184,0.35)",
                 }}
               >
-                {(userEmail ?? "N")[0]?.toUpperCase()}
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "rgba(226,238,255,0.85)",
-                  maxWidth: 140,
-                  whiteSpace: "nowrap",
-                  textOverflow: "ellipsis",
-                  overflow: "hidden",
-                }}
-              >
-                {userEmail ?? "Signed in"}
-              </span>
-              <button
-                type="button"
-                onClick={handleLogout}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "rgba(248,250,252,0.88)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                Log out
-              </button>
-            </div>
+                <code style={{ fontSize: 12, color: "#e2e8f0", fontFamily: "monospace", letterSpacing: "0.02em" }}>{displayUsername}</code>
+                <button
+                  type="button"
+                  onClick={copyUsername}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: copyDone ? "#10b981" : "rgba(167,139,250,0.95)",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {copyDone ? "Copied" : "Copy"}
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "rgba(226,232,240,0.9)",
+                background: "rgba(15,23,42,0.75)",
+                border: "1px solid rgba(148,163,184,0.4)",
+                borderRadius: 6,
+                padding: "6px 14px",
+                cursor: "pointer",
+              }}
+            >
+              Log out
+            </button>
           </>
         ) : (
           <Link

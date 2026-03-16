@@ -1,0 +1,82 @@
+{
+    "image": "dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f.jpg",
+    "image_path": "temp_uploads\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f.jpg",
+    "image_width": 640,
+    "image_height": 640,
+    "image_area_pixels": 409600,
+    "num_detections": 3,
+    "total_fouling_pixels": 21306,
+    "coverage_percent": 5.2017,
+    "severity": "Medium",
+    "annotated_path": "pipeline_outputs\\annotated\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.9318,
+            "bbox_xyxy": [
+                272,
+                226,
+                482,
+                334
+            ],
+            "bbox_area_pixels": 22680,
+            "mask_pixels": 10158,
+            "coverage_percent_of_image": 2.48,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_crop_0.png",
+            "crop_box_xyxy": [
+                278,
+                231,
+                472,
+                326
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.9064,
+            "bbox_xyxy": [
+                380,
+                138,
+                525,
+                240
+            ],
+            "bbox_area_pixels": 14790,
+            "mask_pixels": 7285,
+            "coverage_percent_of_image": 1.7786,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_crop_1.png",
+            "crop_box_xyxy": [
+                385,
+                143,
+                519,
+                236
+            ]
+        },
+        {
+            "id": 2,
+            "class_name": "biofouling",
+            "confidence": 0.8901,
+            "bbox_xyxy": [
+                567,
+                146,
+                640,
+                261
+            ],
+            "bbox_area_pixels": 8395,
+            "mask_pixels": 3863,
+            "coverage_percent_of_image": 0.9431,
+            "mask_path": "pipeline_outputs\\masks\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_mask_2.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset4_marinegrowth_70_9866_acanthopagrus_and_caranx_f000057_jpg.rf.1b886c58f754a2174919111f85f9d49f_crop_2.png",
+            "crop_box_xyxy": [
+                571,
+                163,
+                639,
+                246
+            ]
+        }
+    ]
+}

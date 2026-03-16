@@ -1,4 +1,10 @@
-import type { DetectResponse, Inspection, DashboardStats } from "@/types";
+import type {
+  DetectResponse,
+  Inspection,
+  DashboardStats,
+  AgenticInspectResponse,
+  AgenticVessel,
+} from "@/types";
 import { exportInspectionPdf } from "./exportPdf";
 
 // In browser on production (Vercel), use same-origin proxy to avoid CORS; localhost and server use backend URL
@@ -10,26 +16,78 @@ function getBase(): string {
 }
 const BASE = getBase();
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers || undefined);
-
+function getAuthHeaders(): HeadersInit {
+  const headers: Record<string, string> = {};
   if (typeof window !== "undefined") {
     const token = window.localStorage.getItem("nauticai:token");
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
+    if (token) headers["Authorization"] = `Bearer ${token}`;
   }
+  return headers;
+}
 
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers || undefined);
+  const auth = getAuthHeaders();
+  if (auth && typeof auth === "object" && "Authorization" in auth) {
+    headers.set("Authorization", (auth as Record<string, string>)["Authorization"]);
+  }
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
   return (await res.json()) as T;
 }
 
-const INSPECTIONS_CACHE_TTL_MS = 20_000; // 20 seconds
+const INSPECTIONS_CACHE_TTL_MS = 60_000; // 60 seconds
 let inspectionsCache: { data: Inspection[]; ts: number } | null = null;
+let inspectionsInFlight: Promise<Inspection[]> | null = null;
 
 export function invalidateInspectionsCache(): void {
   inspectionsCache = null;
+}
+
+/** Map Agentic vessel to Inspection for Dashboard/Reports */
+function vesselToInspection(v: AgenticVessel): Inspection {
+  return {
+    id: v.vessel_id,
+    inspection_id: v.vessel_id,
+    status: "completed",
+    created_at: v.last_inspection,
+    file_name: null,
+    vessel_name: v.vessel_id,
+    detected_classes: null,
+    highest_confidence: null,
+    risk_level: v.requires_cleaning ? "HIGH" : "LOW",
+    risk_score: v.requires_cleaning ? 8 : 3,
+    imo_rating: v.imo_rating,
+    requires_cleaning: v.requires_cleaning,
+    image_count: v.image_count ?? 1,
+    image_url: null,
+    annotated_image_url: null,
+  };
+}
+
+/** Map Agentic inspect response to Inspection for display */
+export function agenticResponseToInspection(
+  r: AgenticInspectResponse,
+  fileName?: string | null
+): Inspection {
+  return {
+    id: r.metadata.vessel_id,
+    inspection_id: r.metadata.vessel_id,
+    status: "completed",
+    created_at: r.metadata.inspection_timestamp,
+    file_name: fileName ?? null,
+    vessel_name: r.metadata.vessel_id,
+    detected_classes: null,
+    highest_confidence: null,
+    risk_level: r.compliance_result.requires_cleaning ? "HIGH" : "LOW",
+    risk_score: r.compliance_result.requires_cleaning ? 8.5 : 2,
+    inference_time: null,
+    imo_rating: r.compliance_result.official_imo_rating,
+    requires_cleaning: r.compliance_result.requires_cleaning,
+    total_hull_coverage_percentage: r.ai_vision_metrics.total_hull_coverage_percentage,
+    image_url: null,
+    annotated_image_url: null,
+  };
 }
 
 async function listInspectionsInternal(forceRefresh = false): Promise<Inspection[]> {
@@ -37,58 +95,108 @@ async function listInspectionsInternal(forceRefresh = false): Promise<Inspection
   if (!forceRefresh && inspectionsCache && now - inspectionsCache.ts < INSPECTIONS_CACHE_TTL_MS) {
     return inspectionsCache.data;
   }
-  try {
-    const payload = await req<{ inspections: Inspection[] }>("/inspections");
-    const data = payload.inspections ?? [];
-    inspectionsCache = { data, ts: now };
-    return data;
-  } catch {
-    if (inspectionsCache) return inspectionsCache.data;
-    return [];
+  if (inspectionsInFlight && !forceRefresh) {
+    return inspectionsInFlight;
   }
+  const doFetch = async (): Promise<Inspection[]> => {
+    try {
+      const payload = await req<{ vessels: AgenticVessel[] }>("/api/vessels/all");
+      const vessels = payload.vessels ?? [];
+      const data = vessels.map(vesselToInspection);
+      inspectionsCache = { data, ts: Date.now() };
+      return data;
+    } catch {
+      if (inspectionsCache) return inspectionsCache.data;
+      return [];
+    } finally {
+      inspectionsInFlight = null;
+    }
+  };
+  inspectionsInFlight = doFetch();
+  return inspectionsInFlight;
 }
 
 export const api = {
-  /* Detection / upload */
-  async upload(file: File, vesselName?: string): Promise<DetectResponse> {
+  /**
+   * Run inspection via Agentic backend: POST /api/inspect with vessel_id + image.
+   * Returns Agentic JSON (metadata, ai_vision_metrics, compliance_result).
+   */
+  async runAgenticInspection(
+    vesselId: string,
+    imageFile: File
+  ): Promise<AgenticInspectResponse> {
     const form = new FormData();
-    form.append("file", file);
-    if (vesselName) form.append("vessel_name", vesselName);
-    const res = await req<DetectResponse>("/detect", { method: "POST", body: form });
+    form.append("vessel_id", vesselId);
+    form.append("image", imageFile);
+
+    const res = await req<AgenticInspectResponse>("/api/inspect", {
+      method: "POST",
+      body: form,
+    });
     invalidateInspectionsCache();
     return res;
   },
 
-  /* Inspections list + detail (from Supabase via FastAPI). Cached for 20s for fast Dashboard/Reports navigation. */
+  /** Upload: uses Agentic POST /api/inspect. vesselId defaults to inspection_<timestamp>. imageIndex for batch (0, 1, 2, ...). */
+  async upload(
+    file: File,
+    vesselName?: string,
+    imageIndex?: number
+  ): Promise<AgenticInspectResponse> {
+    const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
+    const form = new FormData();
+    form.append("vessel_id", vesselId);
+    form.append("image", file);
+    if (imageIndex != null && imageIndex > 0) {
+      form.append("image_index", String(imageIndex));
+    }
+    const res = await req<AgenticInspectResponse>("/api/inspect", {
+      method: "POST",
+      body: form,
+    });
+    invalidateInspectionsCache();
+    return res;
+  },
+
   async listInspections(forceRefresh = false): Promise<Inspection[]> {
     return listInspectionsInternal(forceRefresh);
   },
 
-  async getInspection(inspectionId: string): Promise<Inspection | undefined> {
-    const inspections = await listInspectionsInternal();
-    return inspections.find((i) => i.inspection_id === inspectionId);
+  /** Get latest report for a vessel (Agentic GET /api/vessel/{id}/latest-report). */
+  async getInspection(vesselId: string): Promise<Inspection | undefined> {
+    try {
+      const data = await req<AgenticInspectResponse>(
+        `/api/vessel/${encodeURIComponent(vesselId)}/latest-report`
+      );
+      return agenticResponseToInspection(data, null);
+    } catch {
+      return undefined;
+    }
   },
 
-  /** Delete an inspection by its database id. */
-  async deleteInspection(id: string): Promise<void> {
-    const headers: HeadersInit = {};
-    if (typeof window !== "undefined") {
-      const token = window.localStorage.getItem("nauticai:token");
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+  /** Get full Agentic report JSON for Results page (same shape as POST /api/inspect response). */
+  async getAgenticReport(vesselId: string): Promise<AgenticInspectResponse | null> {
+    try {
+      return await req<AgenticInspectResponse>(
+        `/api/vessel/${encodeURIComponent(vesselId)}/latest-report`
+      );
+    } catch {
+      return null;
     }
-    const res = await fetch(`${getBase()}/inspections/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers,
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const msg = typeof data?.detail === "string" ? data.detail : "Failed to delete";
-      throw new Error(msg);
-    }
+  },
+
+  /** Delete inspection (vessel) on backend; invalidates cache. */
+  async deleteInspection(vesselId: string): Promise<void> {
+    const path = `/api/vessel/${encodeURIComponent(vesselId)}`;
+    const headers = getAuthHeaders() as Record<string, string>;
+    const res = await fetch(`${BASE}${path}`, { method: "DELETE", headers });
     invalidateInspectionsCache();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { detail?: string })?.detail ?? `Delete failed: ${res.status}`);
+    }
   },
 
-  /* Stats derived from inspections list */
   async getStats(): Promise<DashboardStats> {
     const inspections = await listInspectionsInternal();
     if (!inspections.length) {
@@ -102,7 +210,7 @@ export const api = {
 
     const total_inspections = inspections.length;
     const high_risk_count = inspections.filter(
-      (i) => i.risk_level === "HIGH" || i.risk_level === "CRITICAL"
+      (i) => i.requires_cleaning === true || i.risk_level === "HIGH" || i.risk_level === "CRITICAL"
     ).length;
 
     const classCount = (i: Inspection): number => {
@@ -120,11 +228,12 @@ export const api = {
     };
     const total_anomalies = inspections.reduce(
       (sum, i) => sum + classCount(i),
-      0
+      high_risk_count
     );
 
-    // Approximate risk score 0–10 from risk_level if numeric field is not stored
     const riskScoreFor = (i: Inspection): number => {
+      if (i.risk_score != null) return i.risk_score;
+      if (i.requires_cleaning) return 8.5;
       switch (i.risk_level) {
         case "HIGH":
         case "CRITICAL":
@@ -140,8 +249,7 @@ export const api = {
     };
 
     const avg_risk_score =
-      inspections.reduce((sum, i) => sum + riskScoreFor(i), 0) /
-      total_inspections;
+      inspections.reduce((sum, i) => sum + riskScoreFor(i), 0) / total_inspections;
 
     return {
       total_inspections,
@@ -151,91 +259,113 @@ export const api = {
     };
   },
 
-  /* Reports */
-  exportReportUrl(inspectionId: string): string {
-    return `${BASE}/inspections?inspection_id=${encodeURIComponent(
-      inspectionId
-    )}`;
+  exportReportUrl(vesselId: string): string {
+    return `${BASE}/api/vessel/${encodeURIComponent(vesselId)}/pdf`;
   },
 
-  /** Generate and download a clean PDF report. Pass optional annotated image (e.g. from live detection) to include it. */
+  /** URL for the annotated hull image (live preview). Use imageIndex for batch (0 = first, 1 = second, ...). */
+  getAnnotatedImageUrl(vesselId: string, imageIndex?: number): string {
+    const path = `${BASE}/api/vessel/${encodeURIComponent(vesselId)}/annotated-image`;
+    if (imageIndex != null && imageIndex > 0) {
+      return `${path}?index=${imageIndex}`;
+    }
+    return path;
+  },
+
+  /**
+   * Fetch annotated image with auth and return a blob URL for <img src>. Caller should revoke the URL when done (e.g. in useEffect cleanup).
+   */
+  async fetchAnnotatedImageBlobUrl(vesselId: string, imageIndex?: number): Promise<string> {
+    const path = imageIndex != null && imageIndex > 0
+      ? `/api/vessel/${encodeURIComponent(vesselId)}/annotated-image?index=${imageIndex}`
+      : `/api/vessel/${encodeURIComponent(vesselId)}/annotated-image`;
+    const res = await fetch(`${BASE}${path}`, { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(`Failed to load image: ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
+  /**
+   * Download PDF from Agentic backend with auth (GET /api/vessel/{vessel_id}/pdf). Fetches with Bearer token and opens blob in new tab.
+   */
+  async downloadAgenticPdf(vesselId: string): Promise<void> {
+    if (typeof window === "undefined") return;
+    const path = `/api/vessel/${encodeURIComponent(vesselId)}/pdf`;
+    const res = await fetch(`${BASE}${path}`, { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const filename = `${vesselId}_Audit_Report.pdf`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 200);
+  },
+
+  /** PDF export: for Agentic we use server PDF; fallback to client jsPDF if needed. */
   exportReportPdf(
     inspection: Inspection,
-    annotatedImage?: string | null
+    _annotatedImage?: string | null
   ): void {
-    exportInspectionPdf(inspection, annotatedImage);
+    const vesselId = inspection.inspection_id ?? inspection.id;
+    if (vesselId) {
+      this.downloadAgenticPdf(vesselId);
+    } else {
+      exportInspectionPdf(inspection, null);
+    }
   },
 
-  /** Build a minimal Inspection from a live DetectResponse for PDF export. */
-  inspectionFromDetectResponse(detect: DetectResponse): Inspection {
-    return {
-      id: detect.inspection_id,
-      inspection_id: detect.inspection_id,
-      status: "completed",
-      created_at: detect.timestamp,
-      file_name: detect.file_name ?? null,
-      vessel_name: null,
-      detected_classes: detect.detections.map((d) => d.class_name),
-      anomalies: null,
-      highest_confidence: detect.summary.max_confidence,
-      risk_level: detect.summary.risk_level,
-      risk_score: undefined,
-      inference_time: detect.summary.inference_time_ms / 1000,
-      precision: detect.model_metrics.precision,
-      recall: detect.model_metrics.recall,
-      map50: detect.model_metrics.map50,
-      map5095: detect.model_metrics.map5095,
-      image_url: null,
-      annotated_image_url: null,
-    };
+  /** Build Inspection from Agentic response (for Results page). */
+  inspectionFromDetectResponse(_detect: DetectResponse): Inspection {
+    return agenticResponseToInspection(
+      _detect as unknown as AgenticInspectResponse,
+      null
+    );
+  },
+
+  /** Current user (id, email, username). Use for showing username in nav/Dashboard and for Telegram bot. */
+  async getCurrentUser(): Promise<{ user: { id: number; email: string; username?: string | null } }> {
+    return req("/auth/me");
   },
 };
 
-/** Auth request: parses error body so user sees backend message (e.g. "Invalid email or password"). */
+/** Auth: Agentic backend has no auth; these will 404. Kept for compatibility. */
 async function authReq<T>(
   path: string,
   body: { email: string; password?: string; [k: string]: unknown }
 ): Promise<T> {
   const url = `${getBase()}${path}`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg =
-        typeof data?.detail === "string"
-          ? data.detail
-          : Array.isArray(data?.detail)
-            ? data.detail[0]?.msg ?? "Invalid request"
-            : res.status === 401
-              ? "Invalid email or password"
-              : res.status === 500
-                ? "Server error. Please try again."
-                : "Authentication failed";
-      throw new Error(msg);
-    }
-    return data as T;
-  } catch (err) {
-    if (err instanceof Error) {
-      if (err.message.startsWith("Invalid") || err.message.includes("Auth") || err.message.includes("Server") || err.message.includes("required")) throw err;
-      throw new Error("Cannot reach server. Check your connection and that the backend is running.");
-    }
-    throw new Error("Authentication failed");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg =
+      typeof data?.detail === "string"
+        ? data.detail
+        : res.status === 404
+          ? "Auth not available on this backend."
+          : "Authentication failed";
+    throw new Error(msg);
   }
+  return data as T;
 }
 
-export async function authSignup(email: string, password: string) {
-  return authReq<{ token: string; user: { id: number; email: string } }>(
+export async function authSignup(email: string, password: string, username?: string) {
+  return authReq<{ token: string; user: { id: number; email: string; username?: string | null; telegram_user_id?: string | null } }>(
     "/auth/signup",
-    { email, password }
+    { email, password, username: username ?? "" }
   );
 }
 
 export async function authLogin(email: string, password: string) {
-  return authReq<{ token: string; user: { id: number; email: string } }>(
+  return authReq<{ token: string; user: { id: number; email: string; username?: string | null; telegram_user_id?: string | null } }>(
     "/auth/login",
     { email, password }
   );
@@ -245,7 +375,12 @@ export async function authForgotPassword(email: string): Promise<void> {
   await authReq<{ ok: boolean }>("/auth/forgot-password", { email });
 }
 
-export async function authResetPassword(token: string, newPassword: string): Promise<void> {
-  await authReq<{ ok: boolean }>("/auth/reset-password", { token, new_password: newPassword });
+export async function authResetPassword(
+  token: string,
+  newPassword: string
+): Promise<void> {
+  await authReq<{ ok: boolean }>("/auth/reset-password", {
+    token,
+    new_password: newPassword,
+  });
 }
-

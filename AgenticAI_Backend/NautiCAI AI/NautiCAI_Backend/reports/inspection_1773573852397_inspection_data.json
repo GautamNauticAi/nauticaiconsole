@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "inspection_1773573852397",
+        "inspection_timestamp": "2026-03-15 16:54:36",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 98.9244,
+        "severity": "High",
+        "total_detections": 1
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-4 (Heavy Macrofouling - Critical!)",
+        "recommended_action": "URGENT: Immediate dry-dock cleaning required!",
+        "requires_cleaning": true
+    }
+}

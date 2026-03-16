@@ -16,6 +16,13 @@ export async function POST(
   return proxy(request, context, "POST");
 }
 
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ path?: string[] }> }
+) {
+  return proxy(request, context, "DELETE");
+}
+
 export async function OPTIONS(
   request: NextRequest,
   context: { params: Promise<{ path?: string[] }> }
@@ -50,6 +57,19 @@ async function proxy(
       body: body && body.byteLength > 0 ? body : undefined,
     });
 
+    const contentType = res.headers.get("content-type") ?? "";
+    const isJson = contentType.includes("application/json");
+    const isBinary = contentType.includes("application/pdf") || contentType.includes("image/");
+
+    if (isBinary) {
+      const buf = await res.arrayBuffer();
+      const disposition = res.headers.get("content-disposition");
+      const outHeaders: Record<string, string> = { "Access-Control-Allow-Origin": "*" };
+      if (contentType) outHeaders["Content-Type"] = contentType;
+      if (disposition) outHeaders["Content-Disposition"] = disposition;
+      return new NextResponse(buf, { status: res.status, headers: outHeaders });
+    }
+
     const data = await res.text();
     let parsed: unknown;
     try {
@@ -60,9 +80,7 @@ async function proxy(
 
     return NextResponse.json(parsed, {
       status: res.status,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (err) {
     console.error("[api/backend proxy]", err);

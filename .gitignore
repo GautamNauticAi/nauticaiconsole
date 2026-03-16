@@ -6,7 +6,7 @@ node_modules/
 dist/
 out/
 
-NautiCAI_AgenticAI/
+# Backend is tracked (AgenticAI_Backend). Do not ignore.
 
 # Logs
 npm-debug.log*

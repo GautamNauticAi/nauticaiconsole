@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "inspection_1773641804783",
+        "inspection_timestamp": "2026-03-16 11:47:26",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 0.2458,
+        "severity": "Low",
+        "total_detections": 3
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-2 (Light Macrofouling)",
+        "recommended_action": "Monitor vessel condition regularly.",
+        "requires_cleaning": false
+    }
+}

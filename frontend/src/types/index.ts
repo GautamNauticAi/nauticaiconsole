@@ -27,7 +27,7 @@ export interface Anomaly {
 
 /**
  * Row returned from the FastAPI + Supabase /inspections endpoint.
- * Mirrors the columns inserted in api.py.
+ * Mirrors the columns returned by the backend (nauticai_api.py).
  */
 export interface Inspection {
   id: string; // Supabase row id (uuid)
@@ -48,6 +48,14 @@ export interface Inspection {
   map5095?: number | null;
   image_url?: string | null;
   annotated_image_url?: string | null;
+  /** From Agentic: IMO rating (e.g. FR-2, FR-4) */
+  imo_rating?: string | null;
+  /** From Agentic: cleaning required */
+  requires_cleaning?: boolean | null;
+  /** From Agentic: hull coverage % */
+  total_hull_coverage_percentage?: number | null;
+  /** From Agentic: number of images in this inspection (1 = single). */
+  image_count?: number | null;
 }
 
 export interface DashboardStats {
@@ -97,4 +105,33 @@ export interface DetectResponse {
   summary: DetectionSummary;
   model_metrics: ModelMetrics;
   timestamp: string;
+}
+
+/** Response from Agentic backend POST /api/inspect */
+export interface AgenticInspectResponse {
+  metadata: {
+    vessel_id: string;
+    inspection_timestamp: string;
+    system_status: string;
+  };
+  ai_vision_metrics: {
+    total_hull_coverage_percentage: number;
+    severity: string;
+    total_detections: number;
+  };
+  compliance_result: {
+    official_imo_rating: string;
+    recommended_action: string;
+    requires_cleaning: boolean;
+  };
+}
+
+/** Vessel row from Agentic GET /api/vessels/all */
+export interface AgenticVessel {
+  vessel_id: string;
+  last_inspection: string;
+  imo_rating: string;
+  requires_cleaning: boolean;
+  /** Number of images in this inspection (1 = single, 2+ = multi-image). */
+  image_count?: number;
 }

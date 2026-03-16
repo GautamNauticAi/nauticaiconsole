@@ -1,0 +1,16 @@
+# Lightweight 24/7 Telegram bot. Calls your deployed backend API (validate, latest-pdf, latest-report).
+# Build: docker build -f Dockerfile.bot -t nauticai-bot .
+# Run:   docker run --env-file .env nauticai-bot
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-bot.txt .
+RUN pip install --no-cache-dir -r requirements-bot.txt
+
+COPY nauticai_telegram_bot.py .
+
+ENV TELEGRAM_VALIDATE_URL=https://your-backend-url
+# Set TELEGRAM_BOT_TOKEN in Cloud Run (or .env). Set TELEGRAM_VALIDATE_URL to your backend URL.
+
+CMD ["python", "-u", "nauticai_telegram_bot.py"]

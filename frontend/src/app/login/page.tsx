@@ -35,6 +35,7 @@ const strengthColor: Record<NonNullable<PasswordStrength>, string> = {
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -64,14 +65,25 @@ export default function LoginPage() {
           setErr("Password must be at least 8 characters.");
           return;
         }
+        const u = username.trim().toLowerCase();
+        if (!u || u.length < 2) {
+          setErr("Username must be at least 2 characters.");
+          return;
+        }
+        if (!/^[a-z0-9_.]+$/.test(u)) {
+          setErr("Username: only letters, numbers, underscore, period.");
+          return;
+        }
       }
       setLoading(true);
       try {
-        const fn = mode === "login" ? authLogin : authSignup;
-        const res = await fn(trimmedEmail, password);
+        const res = mode === "login"
+          ? await authLogin(trimmedEmail, password)
+          : await authSignup(trimmedEmail, password, username.trim().toLowerCase());
         if (typeof window !== "undefined") {
           window.localStorage.setItem("nauticai:token", res.token);
           window.localStorage.setItem("nauticai:userEmail", res.user.email);
+          if (res.user?.username) window.localStorage.setItem("nauticai:username", res.user.username);
         }
         router.push("/dashboard");
       } catch (error) {
@@ -80,7 +92,7 @@ export default function LoginPage() {
         setLoading(false);
       }
     },
-    [email, password, mode, router]
+    [email, username, password, mode, router]
   );
 
   const handleForgotSubmit = useCallback(
@@ -600,6 +612,43 @@ export default function LoginPage() {
                   }}
                 />
               </div>
+              {mode === "signup" && (
+                <div>
+                  <label
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "rgba(186,230,255,0.50)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      display: "block",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="e.g. johndoe (letters, numbers, _)"
+                    autoComplete="username"
+                    style={{
+                      width: "100%",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      color: "#fff",
+                      outline: "none",
+                      transition: "border-color 0.2s",
+                    }}
+                  />
+                  <p style={{ fontSize: 10, color: "rgba(186,230,255,0.5)", marginTop: 4, marginBottom: 0 }}>Use this in the Telegram bot to get your reports.</p>
+                </div>
+              )}
               <div>
                 <label
                   style={{

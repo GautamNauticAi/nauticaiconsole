@@ -1,0 +1,60 @@
+{
+    "image": "dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8.jpg",
+    "image_path": "temp_uploads\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8.jpg",
+    "image_width": 312,
+    "image_height": 312,
+    "image_area_pixels": 97344,
+    "num_detections": 2,
+    "total_fouling_pixels": 54895,
+    "coverage_percent": 56.3928,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.8339,
+            "bbox_xyxy": [
+                221,
+                0,
+                311,
+                201
+            ],
+            "bbox_area_pixels": 18090,
+            "mask_pixels": 16014,
+            "coverage_percent_of_image": 16.4509,
+            "mask_path": "pipeline_outputs\\masks\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_crop_0.png",
+            "crop_box_xyxy": [
+                225,
+                0,
+                311,
+                193
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.743,
+            "bbox_xyxy": [
+                0,
+                0,
+                208,
+                207
+            ],
+            "bbox_area_pixels": 43056,
+            "mask_pixels": 38881,
+            "coverage_percent_of_image": 39.9419,
+            "mask_path": "pipeline_outputs\\masks\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\dataset3_biofouling_frame0-17-14-50_jpg.rf.325b755ceac93ffdc3e6bfb399ff67c8_crop_1.png",
+            "crop_box_xyxy": [
+                0,
+                0,
+                197,
+                201
+            ]
+        }
+    ]
+}

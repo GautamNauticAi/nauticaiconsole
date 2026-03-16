@@ -3,43 +3,105 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { PageShell } from "@/components/PageShell";
-import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { api } from "@/lib/api";
-import type {
-  Anomaly,
-  Severity,
-  DetectResponse,
-  DetectionBox,
-  Inspection,
-} from "@/types";
+import type { AgenticInspectResponse } from "@/types";
 
-const severityColor: Record<Severity, string> = {
-  low:      "#10b981",
-  medium:   "#f59e0b",
-  high:     "#ef4444",
-  critical: "#dc2626",
-};
+/** Annotated hull image (live preview) fetched with auth so backend returns the image. imageIndex for batch (0, 1, 2, ...). */
+function AnnotatedPreview({
+  vesselId,
+  imageIndex = 0,
+}: {
+  vesselId: string;
+  imageIndex?: number;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [imgError, setImgError] = useState(false);
 
-const severityBg: Record<Severity, string> = {
-  low:      "rgba(16,185,129,0.12)",
-  medium:   "rgba(245,158,11,0.12)",
-  high:     "rgba(239,68,68,0.12)",
-  critical: "rgba(220,38,38,0.15)",
-};
+  useEffect(() => {
+    let revoked = false;
+    let createdUrl: string | null = null;
+    setLoading(true);
+    setImgError(false);
+    api
+      .fetchAnnotatedImageBlobUrl(vesselId, imageIndex)
+      .then((url) => {
+        createdUrl = url;
+        if (!revoked) {
+          setBlobUrl(url);
+          setLoading(false);
+        } else {
+          URL.revokeObjectURL(url);
+        }
+      })
+      .catch(() => {
+        if (!revoked) {
+          setImgError(true);
+          setLoading(false);
+        }
+      });
+    return () => {
+      revoked = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [vesselId, imageIndex]);
 
-const anomalyIcon: Record<string, string> = {
-  corrosion:     "🔴",
-  marine_growth: "🟣",
-  hull_debris:   "🟠",
-  dents_damage:  "🔵",
-  clean:         "🟢",
-};
+  const fallback = (
+    <div
+      style={{
+        height: "min(42vh, 280px)",
+        borderRadius: 10,
+        background: "rgba(15,23,42,0.90)",
+        border: "1px dashed rgba(148,163,184,0.60)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "rgba(186,230,255,0.75)",
+        fontSize: 12,
+        textAlign: "center",
+        padding: "0 16px",
+      }}
+    >
+      <span style={{ fontSize: 28, marginBottom: 8 }}>✓</span>
+      <p style={{ margin: 0 }}>Inspection complete</p>
+      <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(186,230,255,0.6)" }}>
+        Download the official PDF for full details and audit trail.
+      </p>
+    </div>
+  );
 
-function RiskGauge({ score }: { score: number }) {
+  if (loading) {
+    return (
+      <div style={{ minHeight: "min(42vh, 280px)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(186,230,255,0.7)", fontSize: 13 }}>
+        Loading image…
+      </div>
+    );
+  }
+  if (imgError || !blobUrl) return fallback;
+
+  return (
+    <img
+      src={blobUrl}
+      alt="Annotated hull inspection"
+      style={{
+        maxHeight: "min(42vh, 320px)",
+        width: "auto",
+        maxWidth: "100%",
+        objectFit: "contain",
+        borderRadius: 8,
+        display: "block",
+      }}
+      onError={() => setImgError(true)}
+    />
+  );
+}
+
+function RiskGauge({ requiresCleaning }: { requiresCleaning: boolean }) {
+  const color = requiresCleaning ? "#dc2626" : "#10b981";
+  const score = requiresCleaning ? 8.5 : 2;
   const pct = (score / 10) * 100;
-  const color = score >= 8 ? "#dc2626" : score >= 5 ? "#f59e0b" : "#10b981";
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
       <div style={{ position: "relative", width: 80, height: 80 }}>
@@ -63,44 +125,8 @@ function RiskGauge({ score }: { score: number }) {
         background: `${color}18`, border: `1px solid ${color}44`,
         borderRadius: 999, padding: "2px 10px",
       }}>
-        {score >= 8 ? "Critical Risk" : score >= 5 ? "High Risk" : "Low Risk"}
+        {requiresCleaning ? "Cleaning required" : "Acceptable"}
       </span>
-    </div>
-  );
-}
-
-function AnomalyCard({ a }: { a: Anomaly }) {
-  const color = severityColor[a.severity];
-  const bg    = severityBg[a.severity];
-  return (
-    <div style={{
-      background: bg,
-      border: `1px solid ${color}30`,
-      borderRadius: 12, padding: "12px 14px",
-      display: "flex", gap: 12, alignItems: "flex-start",
-    }}>
-      <span style={{ fontSize: 20, flexShrink: 0 }}>{anomalyIcon[a.type] ?? "⚪"}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{a.label}</span>
-          <span style={{
-            fontSize: 10, fontWeight: 700, color,
-            background: `${color}22`, border: `1px solid ${color}44`,
-            borderRadius: 999, padding: "2px 8px", textTransform: "capitalize",
-          }}>{a.severity}</span>
-        </div>
-        <div style={{ display: "flex", gap: 14 }}>
-          <span style={{ fontSize: 11, color: "rgba(186,230,255,0.55)" }}>
-            Confidence: <strong style={{ color: "#fff" }}>{(a.confidence * 100).toFixed(0)}%</strong>
-          </span>
-          <span style={{ fontSize: 11, color: "rgba(186,230,255,0.55)" }}>
-            Area: <strong style={{ color: "#fff" }}>{a.area_percentage.toFixed(1)}%</strong>
-          </span>
-        </div>
-        <div style={{ marginTop: 6, height: 3, borderRadius: 999, background: "rgba(255,255,255,0.10)", overflow: "hidden" }}>
-          <div style={{ height: "100%", background: color, borderRadius: 999, width: `${a.confidence * 100}%` }} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -108,40 +134,49 @@ function AnomalyCard({ a }: { a: Anomaly }) {
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
-  const [liveDetect, setLiveDetect] = useState<DetectResponse | null>(null);
-  const [liveBatch, setLiveBatch] = useState<DetectResponse[] | null>(null);
+  const [agenticReport, setAgenticReport] = useState<AgenticInspectResponse | null>(null);
+  const [agenticBatch, setAgenticBatch] = useState<AgenticInspectResponse[] | null>(null);
   const [batchIndex, setBatchIndex] = useState(0);
-  const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [loading, setLoading] = useState(true);
   const [hullRegion, setHullRegion] = useState("");
   const [shellThickness, setShellThickness] = useState("");
-  const [imageViewerOpen, setImageViewerOpen] = useState(false);
 
   const fromLive = searchParams.get("source") === "live";
   const isBatch = searchParams.get("batch") === "1";
+
+  const normalizeVesselId = (s: string) => (s || "").trim().replace(/\s+/g, "_");
 
   useEffect(() => {
     if (!id) return;
 
     if (fromLive && typeof window !== "undefined") {
+      const normId = normalizeVesselId(id);
       if (isBatch) {
-        const raw = sessionStorage.getItem("nauticai:lastInspectionBatch");
+        const raw = sessionStorage.getItem("nauticai:lastAgenticInspectionBatch");
         if (raw) {
           try {
-            const batch: DetectResponse[] = JSON.parse(raw);
-            if (Array.isArray(batch) && batch.length > 0 && batch[0].inspection_id === id) {
-              setLiveBatch(batch);
+            const batch: AgenticInspectResponse[] = JSON.parse(raw);
+            if (Array.isArray(batch) && batch.length > 0 && normalizeVesselId(batch[0].metadata.vessel_id) === normId) {
+              setAgenticBatch(batch);
               setBatchIndex(0);
+              setAgenticReport(batch[0]);
+              setLoading(false);
+              return;
             }
           } catch {
             // ignore
           }
         }
       } else {
-        const raw = sessionStorage.getItem("nauticai:lastInspection");
+        const raw = sessionStorage.getItem("nauticai:lastAgenticInspection");
         if (raw) {
           try {
-            const parsed: DetectResponse = JSON.parse(raw);
-            if (parsed.inspection_id === id) setLiveDetect(parsed);
+            const parsed: AgenticInspectResponse = JSON.parse(raw);
+            if (normalizeVesselId(parsed.metadata.vessel_id) === normId) {
+              setAgenticReport(parsed);
+              setLoading(false);
+              return;
+            }
           } catch {
             // ignore
           }
@@ -149,46 +184,15 @@ export default function ResultsPage() {
       }
     }
 
-    api
-      .getInspection(id)
-      .then((ins) => {
-        if (ins) setInspection(ins);
-      })
-      .catch(() => {});
+    api.getAgenticReport(id).then((report) => {
+      if (report) setAgenticReport(report);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [fromLive, id, isBatch]);
 
-  const currentLive = liveBatch?.length
-    ? (liveBatch[batchIndex] ?? liveBatch[0])
-    : liveDetect;
-
-  const criticalCount = 0;
-  const highCount = 0;
-
-  const annotatedSrc =
-    currentLive?.annotated_image || inspection?.annotated_image_url || null;
-
-  const anomalies = inspection?.anomalies ?? [];
-  const detections = currentLive?.detections ?? [];
-
-  const effectiveRiskScore = (() => {
-    if (typeof inspection?.risk_score === "number") {
-      return inspection.risk_score;
-    }
-    const level = currentLive?.summary.risk_level;
-    if (!level) return 0;
-    switch (level) {
-      case "HIGH":
-      case "CRITICAL":
-        return 8.5;
-      case "MEDIUM":
-        return 5.5;
-      case "LOW":
-        return 3.0;
-      case "SAFE":
-      default:
-        return 1.0;
-    }
-  })();
+  const currentReport = agenticBatch?.length
+    ? (agenticBatch[batchIndex] ?? agenticBatch[0])
+    : agenticReport;
 
   return (
     <PageShell>
@@ -203,20 +207,20 @@ export default function ResultsPage() {
               <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)" }}>Results</span>
             </div>
             <h1 style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
-              {inspection?.file_name ?? (currentLive ? api.inspectionFromDetectResponse(currentLive).file_name : null) ?? "Hull inspection results"}
+              {currentReport ? `${currentReport.metadata.vessel_id} — Hull inspection` : "Hull inspection results"}
             </h1>
-            {(inspection || currentLive) && (
+            {currentReport && (
               <p style={{ fontSize: 12, color: "rgba(226,238,255,0.72)", marginTop: 6 }}>
-                Inspection ID:{" "}
+                Vessel ID:{" "}
                 <span style={{ fontFamily: "monospace" }}>
-                  {inspection?.inspection_id ?? currentLive?.inspection_id}
+                  {currentReport.metadata.vessel_id}
                 </span>
-                {liveBatch && liveBatch.length > 1 && (
+                {agenticBatch && agenticBatch.length > 1 && (
                   <span style={{ marginLeft: 8, color: "rgba(186,230,255,0.7)" }}>
-                    · Image {batchIndex + 1} of {liveBatch.length} in this run
+                    · Image {batchIndex + 1} of {agenticBatch.length} in this run
                   </span>
                 )}{" "}
-                · {new Date((inspection?.created_at ?? currentLive?.timestamp) ?? "").toLocaleString()}
+                · {new Date(currentReport.metadata.inspection_timestamp).toLocaleString()}
               </p>
             )}
           </div>
@@ -224,9 +228,13 @@ export default function ResultsPage() {
             {id && (
               <button
                 type="button"
-                onClick={() => {
-                  const ins = inspection ?? (currentLive ? api.inspectionFromDetectResponse(currentLive) : null);
-                  if (ins) api.exportReportPdf(ins, currentLive?.annotated_image ?? undefined);
+                onClick={async () => {
+                  try {
+                    await api.downloadAgenticPdf(id);
+                  } catch (e) {
+                    console.error(e);
+                    if (typeof window !== "undefined") window.alert("Download failed. Make sure you are logged in.");
+                  }
                 }}
                 style={{
                   fontSize: 13,
@@ -265,21 +273,21 @@ export default function ResultsPage() {
         >
           {[
             {
-              label: "Findings",
-              value: currentLive?.summary.total ?? inspection?.detected_classes?.length ?? 0,
-              sub: "items detected",
+              label: "Hull coverage",
+              value: currentReport ? `${currentReport.ai_vision_metrics.total_hull_coverage_percentage.toFixed(1)}%` : "—",
+              sub: "fouling area",
               color: "#e2e8f0",
             },
             {
-              label: "Risk",
-              value: currentLive?.summary.risk_level ?? inspection?.risk_level ?? "—",
-              sub: "overall level",
+              label: "IMO rating",
+              value: currentReport?.compliance_result.official_imo_rating ?? "—",
+              sub: "compliance",
               color: "#e2e8f0",
             },
             {
-              label: "Inspection",
-              value: inspection?.file_name ?? (currentLive ? api.inspectionFromDetectResponse(currentLive).file_name : null) ?? "—",
-              sub: null,
+              label: "Condition",
+              value: currentReport?.ai_vision_metrics.severity ?? "—",
+              sub: currentReport ? `${currentReport.ai_vision_metrics.total_detections} area(s) identified` : null,
               color: "#94a3b8",
             },
           ].map((s) => (
@@ -330,18 +338,22 @@ export default function ResultsPage() {
             borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0,
           }}>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(148,163,184,0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0", letterSpacing: "0.01em" }}>Detection result</span>
-              <span style={{ fontSize: 12, color: "rgba(186,230,255,0.65)" }}>
-                {liveBatch && liveBatch.length > 1 ? `Image ${batchIndex + 1} of ${liveBatch.length}` : "Click to enlarge"}
-              </span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0", letterSpacing: "0.01em" }}>Inspection report</span>
+              {agenticBatch && agenticBatch.length > 1 && (
+                <span style={{ fontSize: 12, color: "rgba(186,230,255,0.65)" }}>
+                  Image {batchIndex + 1} of {agenticBatch.length}
+                </span>
+              )}
             </div>
             <div style={{ padding: 10, position: "relative", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {annotatedSrc ? (
+              {loading ? (
+                <div style={{ color: "rgba(186,230,255,0.75)", fontSize: 12 }}>Loading report…</div>
+              ) : currentReport && id ? (
                 <>
-                  {liveBatch && liveBatch.length > 1 && (
+                  {agenticBatch && agenticBatch.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => setBatchIndex((i) => (i <= 0 ? liveBatch.length - 1 : i - 1))}
+                      onClick={() => setBatchIndex((i) => (i <= 0 ? agenticBatch.length - 1 : i - 1))}
                       aria-label="Previous image"
                       style={{
                         position: "absolute",
@@ -365,105 +377,11 @@ export default function ResultsPage() {
                       ‹
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setImageViewerOpen(true)}
-                    style={{
-                      position: "relative",
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      background: "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.2), transparent 60%)",
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                      maxHeight: "min(42vh, 320px)",
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                  {currentLive ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={annotatedSrc}
-                      alt="Annotated hull"
-                      style={{
-                        maxHeight: "min(42vh, 320px)",
-                        width: "auto",
-                        maxWidth: "100%",
-                        objectFit: "contain",
-                        display: "block",
-                        borderRadius: 8,
-                      }}
-                    />
-                  ) : (
-                    <Image
-                      src={annotatedSrc}
-                      alt="Annotated hull"
-                      width={800}
-                      height={500}
-                      style={{
-                        maxHeight: "min(42vh, 320px)",
-                        width: "auto",
-                        maxWidth: "100%",
-                        objectFit: "contain",
-                        borderRadius: 8,
-                      }}
-                    />
-                  )}
-                  {anomalies.length > 0 && (
-                    <svg
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        width: "100%",
-                        height: "100%",
-                        pointerEvents: "none",
-                        borderRadius: 8,
-                      }}
-                    >
-                      {anomalies.map((a) => {
-                        const c = severityColor[a.severity];
-                        return (
-                          <g key={a.id}>
-                            <rect
-                              x={`${(a.bbox.x1 / 800) * 100}%`}
-                              y={`${(a.bbox.y1 / 500) * 100}%`}
-                              width={`${((a.bbox.x2 - a.bbox.x1) / 800) * 100}%`}
-                              height={`${((a.bbox.y2 - a.bbox.y1) / 500) * 100}%`}
-                              fill="none"
-                              stroke={c}
-                              strokeWidth="2"
-                            />
-                            <rect
-                              x={`${(a.bbox.x1 / 800) * 100}%`}
-                              y={`calc(${(a.bbox.y1 / 500) * 100}% - 18px)`}
-                              width="96"
-                              height="16"
-                              fill={c}
-                              rx="3"
-                            />
-                            <text
-                              x={`calc(${(a.bbox.x1 / 800) * 100}% + 4px)`}
-                              y={`calc(${(a.bbox.y1 / 500) * 100}% - 5px)`}
-                              fill="#fff"
-                              fontSize="9"
-                              fontWeight="700"
-                              fontFamily="monospace"
-                            >
-                              {a.label} {(a.confidence * 100).toFixed(0)}%
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  )}
-                </button>
-                  {liveBatch && liveBatch.length > 1 && (
+                  <AnnotatedPreview vesselId={id} imageIndex={batchIndex} />
+                  {agenticBatch && agenticBatch.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => setBatchIndex((i) => (i >= liveBatch.length - 1 ? 0 : i + 1))}
+                      onClick={() => setBatchIndex((i) => (i >= agenticBatch.length - 1 ? 0 : i + 1))}
                       aria-label="Next image"
                       style={{
                         position: "absolute",
@@ -489,23 +407,7 @@ export default function ResultsPage() {
                   )}
                 </>
               ) : (
-                <div
-                  style={{
-                    height: "min(42vh, 280px)",
-                    borderRadius: 10,
-                    background: "rgba(15,23,42,0.90)",
-                    border: "1px dashed rgba(148,163,184,0.60)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "rgba(186,230,255,0.75)",
-                    fontSize: 12,
-                    textAlign: "center",
-                    padding: "0 16px",
-                  }}
-                >
-                  Annotated image will appear here once detection returns.
-                </div>
+                <div style={{ color: "rgba(186,230,255,0.75)", fontSize: 12 }}>No report data for this vessel.</div>
               )}
             </div>
           </div>
@@ -604,8 +506,8 @@ export default function ResultsPage() {
               >
                 Risk level
               </span>
-              {(currentLive || inspection) ? (
-                <RiskGauge score={effectiveRiskScore} />
+              {currentReport ? (
+                <RiskGauge requiresCleaning={currentReport.compliance_result.requires_cleaning} />
               ) : (
                 <span
                   style={{
@@ -613,7 +515,7 @@ export default function ResultsPage() {
                     color: "rgba(186,230,255,0.45)",
                   }}
                 >
-                  Waiting for inspection details…
+                  {loading ? "Loading…" : "No report data"}
                 </span>
               )}
             </div>
@@ -652,58 +554,43 @@ export default function ResultsPage() {
                   paddingRight: 4,
                 }}
               >
-              {anomalies.length > 0 ? (
+              {currentReport ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {anomalies.map((a) => (
-                    <div
-                      key={a.id}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: 10,
-                        background: "rgba(30,41,59,0.5)",
-                        border: "1px solid rgba(148,163,184,0.2)",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0", textTransform: "capitalize" }}>
-                        {a.label}
-                      </div>
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
-                        {a.severity} severity
-                      </div>
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: "rgba(30,41,59,0.5)",
+                      border: "1px solid rgba(148,163,184,0.2)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0" }}>
+                      {currentReport.compliance_result.official_imo_rating}
                     </div>
-                  ))}
-                </div>
-              ) : detections.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {detections.map((d, idx) => {
-                    const speciesLine = d.species?.length
-                      ? d.species.map((s) => s.class_name).join(", ")
-                      : null;
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: "12px 14px",
-                          borderRadius: 10,
-                          background: "rgba(30,41,59,0.5)",
-                          border: "1px solid rgba(148,163,184,0.2)",
-                        }}
-                      >
-                        <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0", textTransform: "capitalize" }}>
-                          {d.class_name}
-                        </div>
-                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
-                          {speciesLine ? `Species: ${speciesLine}` : "Detected"}
-                        </div>
-                      </div>
-                    );
-                  })}
+                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
+                      {currentReport.compliance_result.recommended_action}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: "rgba(30,41,59,0.5)",
+                      border: "1px solid rgba(148,163,184,0.2)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#e2e8f0" }}>
+                      {currentReport.ai_vision_metrics.total_detections} fouling area(s) identified
+                    </div>
+                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginTop: 4 }}>
+                      Hull coverage: {currentReport.ai_vision_metrics.total_hull_coverage_percentage.toFixed(1)}% · {currentReport.ai_vision_metrics.severity} severity
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div style={{ textAlign: "center", padding: "28px 0" }}>
-                  <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
                   <p style={{ fontSize: 14, color: "rgba(226,232,240,0.7)" }}>
-                    No issues detected
+                    {loading ? "Loading…" : "No report data"}
                   </p>
                 </div>
               )}
@@ -714,14 +601,6 @@ export default function ResultsPage() {
         </div>
       </div>
 
-      {imageViewerOpen && (liveBatch?.length ? liveBatch.map((r) => r.annotated_image) : annotatedSrc ? [annotatedSrc] : []).length > 0 && (
-        <ImageViewerModal
-          images={liveBatch?.length ? liveBatch.map((r) => r.annotated_image) : [annotatedSrc!]}
-          initialIndex={liveBatch?.length ? batchIndex : 0}
-          title="Annotated output"
-          onClose={() => setImageViewerOpen(false)}
-        />
-      )}
     </PageShell>
   );
 }

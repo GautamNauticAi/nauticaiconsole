@@ -1,0 +1,3 @@
+# Telegram bot only (no torch, YOLO, SAM). Use for 24/7 bot deployment.
+python-telegram-bot>=21.0
+python-dotenv>=1.0.0
