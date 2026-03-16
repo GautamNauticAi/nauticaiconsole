@@ -232,9 +232,42 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ==========================================
+# CLOUD RUN: listen on PORT for health checks (required by Cloud Run)
+# ==========================================
+def _start_health_server():
+    port = int(os.environ.get("PORT", "8080"))
+    try:
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        class _HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"ok")
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        server.socket.setsockopt(__import__("socket").SOL_SOCKET, __import__("socket").SO_REUSEADDR, 1)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        # Give the thread time to bind so Cloud Run's startup probe succeeds
+        import time
+        time.sleep(1)
+        print(f"[NautiCAI Bot] Health server listening on 0.0.0.0:{port}")
+    except Exception as e:
+        print(f"[NautiCAI Bot] Health server failed: {e}")
+        raise
+
+
+# ==========================================
 # START THE BOT
 # ==========================================
 def main():
+    # Start health server first so Cloud Run startup probe passes (must listen on PORT)
+    _start_health_server()
     if not TELEGRAM_BOT_TOKEN:
         print("[NautiCAI Bot] Cannot start: TELEGRAM_BOT_TOKEN is not set.")
         return
