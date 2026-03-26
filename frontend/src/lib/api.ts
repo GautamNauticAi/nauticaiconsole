@@ -4,8 +4,10 @@ import type {
   DashboardStats,
   AgenticInspectResponse,
   AgenticVessel,
+  NdtInputData,
 } from "@/types";
 import { exportInspectionPdf } from "./exportPdf";
+import { enrichInspectionsWithNdt } from "./ndt";
 
 // In browser on production (Vercel), use same-origin proxy to avoid CORS; localhost and server use backend URL
 function getBase(): string {
@@ -102,7 +104,7 @@ async function listInspectionsInternal(forceRefresh = false): Promise<Inspection
     try {
       const payload = await req<{ vessels: AgenticVessel[] }>("/api/vessels/all");
       const vessels = payload.vessels ?? [];
-      const data = vessels.map(vesselToInspection);
+      const data = enrichInspectionsWithNdt(vessels.map(vesselToInspection));
       inspectionsCache = { data, ts: Date.now() };
       return data;
     } catch {
@@ -141,12 +143,22 @@ export const api = {
   async upload(
     file: File,
     vesselName?: string,
-    imageIndex?: number
+    imageIndex?: number,
+    ndtData?: NdtInputData
   ): Promise<AgenticInspectResponse> {
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     const form = new FormData();
     form.append("vessel_id", vesselId);
     form.append("image", file);
+    if (ndtData?.thickness_mm?.trim()) {
+      form.append("ndt_thickness_mm", ndtData.thickness_mm.trim());
+    }
+    if (ndtData?.corrosion_rate_mmpy?.trim()) {
+      form.append("ndt_corrosion_rate_mmpy", ndtData.corrosion_rate_mmpy.trim());
+    }
+    if (ndtData?.location_id?.trim()) {
+      form.append("ndt_location_id", ndtData.location_id.trim());
+    }
     if (imageIndex != null && imageIndex > 0) {
       form.append("image_index", String(imageIndex));
     }
@@ -161,12 +173,22 @@ export const api = {
   /** Batch upload: one request with all images so one backend instance has all files (fixes multi-image annotated + PDF on Cloud Run). */
   async uploadBatch(
     files: File[],
-    vesselName?: string
+    vesselName?: string,
+    ndtData?: NdtInputData
   ): Promise<AgenticInspectResponse[]> {
     if (files.length === 0) return [];
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     const form = new FormData();
     form.append("vessel_id", vesselId);
+    if (ndtData?.thickness_mm?.trim()) {
+      form.append("ndt_thickness_mm", ndtData.thickness_mm.trim());
+    }
+    if (ndtData?.corrosion_rate_mmpy?.trim()) {
+      form.append("ndt_corrosion_rate_mmpy", ndtData.corrosion_rate_mmpy.trim());
+    }
+    if (ndtData?.location_id?.trim()) {
+      form.append("ndt_location_id", ndtData.location_id.trim());
+    }
     for (const file of files) {
       form.append("images", file);
     }

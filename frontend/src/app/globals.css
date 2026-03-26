@@ -3,7 +3,7 @@
 /* Tailwind v4 — import utilities only, skip the preflight CSS reset.
    The preflight was overriding our inline styles on inputs, buttons,
    and textareas, making style changes appear to have no effect. */
-@import "tailwindcss/utilities";
+@tailwind utilities;
 
 :root {
   --background: #050012;

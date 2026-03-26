@@ -56,6 +56,14 @@ export interface Inspection {
   total_hull_coverage_percentage?: number | null;
   /** From Agentic: number of images in this inspection (1 = single). */
   image_count?: number | null;
+  /** Frontend-enriched NDT: location id used during inspect. */
+  ndt_location_id?: string | null;
+  /** Frontend-enriched NDT: initial shell thickness in mm. */
+  ndt_initial_thickness_mm?: number | null;
+  /** Frontend-enriched NDT: estimated thickness loss in %. */
+  ndt_estimated_loss_percent?: number | null;
+  /** Frontend-enriched NDT: resulting thickness after estimated loss. */
+  ndt_estimated_final_thickness_mm?: number | null;
 }
 
 export interface DashboardStats {
@@ -124,6 +132,12 @@ export interface AgenticInspectResponse {
     recommended_action: string;
     requires_cleaning: boolean;
   };
+}
+
+export interface NdtInputData {
+  thickness_mm?: string;
+  corrosion_rate_mmpy?: string;
+  location_id?: string;
 }
 
 /** Vessel row from Agentic GET /api/vessels/all */

@@ -5,7 +5,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
 import { api } from "@/lib/api";
-import type { AgenticInspectResponse } from "@/types";
+import type { AgenticInspectResponse, NdtInputData } from "@/types";
+import { computeNdtMetrics, getNdtForVessel } from "@/lib/ndt";
 
 /** Annotated hull image (live preview) fetched with auth so backend returns the image. imageIndex for batch (0, 1, 2, ...). */
 function AnnotatedPreview({
@@ -138,8 +139,7 @@ export default function ResultsPage() {
   const [agenticBatch, setAgenticBatch] = useState<AgenticInspectResponse[] | null>(null);
   const [batchIndex, setBatchIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [hullRegion, setHullRegion] = useState("");
-  const [shellThickness, setShellThickness] = useState("");
+  const [ndtData, setNdtData] = useState<NdtInputData | null>(null);
 
   const fromLive = searchParams.get("source") === "live";
   const isBatch = searchParams.get("batch") === "1";
@@ -148,6 +148,27 @@ export default function ResultsPage() {
 
   useEffect(() => {
     if (!id) return;
+
+    if (typeof window !== "undefined") {
+      const rawNdt = sessionStorage.getItem("nauticai:lastInspectionNdt");
+      if (rawNdt) {
+        try {
+          setNdtData(JSON.parse(rawNdt) as NdtInputData);
+        } catch {
+          setNdtData(null);
+        }
+      }
+      if (!rawNdt) {
+        const persisted = getNdtForVessel(id);
+        if (persisted) {
+          setNdtData({
+            thickness_mm: persisted.thickness_mm,
+            corrosion_rate_mmpy: persisted.corrosion_rate_mmpy,
+            location_id: persisted.location_id,
+          });
+        }
+      }
+    }
 
     if (fromLive && typeof window !== "undefined") {
       const normId = normalizeVesselId(id);
@@ -208,6 +229,7 @@ export default function ResultsPage() {
   const currentReport = agenticBatch?.length
     ? (agenticBatch[batchIndex] ?? agenticBatch[0])
     : agenticReport;
+  const ndtComputed = currentReport && ndtData ? computeNdtMetrics(ndtData, currentReport) : undefined;
 
   return (
     <PageShell>
@@ -276,11 +298,11 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        {/* Summary – 3 clear cards for clients */}
+        {/* Summary – clear cards for clients */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(4, 1fr)",
             gap: 16,
             marginBottom: 20,
             flexShrink: 0,
@@ -304,6 +326,12 @@ export default function ResultsPage() {
               value: currentReport?.ai_vision_metrics.severity ?? "—",
               sub: currentReport ? `${currentReport.ai_vision_metrics.total_detections} area(s) identified` : null,
               color: "#94a3b8",
+            },
+            {
+              label: "Final thickness (Demo NDT)",
+              value: ndtComputed ? `${ndtComputed.estimated_final_thickness_mm.toFixed(2)} mm` : "—",
+              sub: ndtComputed ? `Sample reduction: -${ndtComputed.estimated_loss_percent.toFixed(1)}% (${ndtComputed.estimated_loss_mm.toFixed(2)} mm)` : "Add NDT thickness in Inspect",
+              color: "#e2e8f0",
             },
           ].map((s) => (
             <div
@@ -430,7 +458,7 @@ export default function ResultsPage() {
           {/* Right panel – compact */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
 
-            {/* UWILD NDT Sensor Inputs */}
+            {/* NDT data captured in inspection flow */}
             <div
               style={{
                 background: "rgba(5,5,20,0.80)",
@@ -450,49 +478,96 @@ export default function ResultsPage() {
                   letterSpacing: "0.01em",
                 }}
               >
-                Add details (optional)
+                NDT data
               </span>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
-                    Area
+                    Location ID
                   </label>
-                  <input
-                    type="text"
-                    value={hullRegion}
-                    onChange={(e) => setHullRegion(e.target.value)}
-                    placeholder="e.g. Aft starboard"
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      background: "rgba(15,23,42,0.9)",
-                      border: "1px solid rgba(148,163,184,0.45)",
-                      borderRadius: 8,
-                      color: "#e2eeff",
-                    }}
-                  />
+                  <div style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    background: "rgba(15,23,42,0.9)",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    borderRadius: 8,
+                    color: "#e2eeff",
+                  }}>
+                    {ndtData?.location_id?.trim() || "Not provided"}
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
-                    Shell thickness (mm)
+                    Original thickness (mm)
                   </label>
-                  <input
-                    type="text"
-                    value={shellThickness}
-                    onChange={(e) => setShellThickness(e.target.value)}
-                    placeholder="e.g. 12"
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      background: "rgba(15,23,42,0.9)",
-                      border: "1px solid rgba(148,163,184,0.45)",
-                      borderRadius: 8,
-                      color: "#e2eeff",
-                    }}
-                  />
+                  <div style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    background: "rgba(15,23,42,0.9)",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    borderRadius: 8,
+                    color: "#e2eeff",
+                  }}>
+                    {ndtData?.thickness_mm?.trim() || "Not provided"}
+                  </div>
                 </div>
+                <div>
+                  <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
+                    Reduction (sample)
+                  </label>
+                  <div style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    background: "rgba(15,23,42,0.9)",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    borderRadius: 8,
+                    color: "#e2eeff",
+                  }}>
+                    {ndtComputed
+                      ? `${ndtComputed.estimated_loss_mm.toFixed(2)} mm (-${ndtComputed.estimated_loss_percent.toFixed(1)}%)`
+                      : "Not available"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
+                    Final thickness (Demo NDT)
+                  </label>
+                  <div style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    background: "rgba(15,23,42,0.9)",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    borderRadius: 8,
+                    color: "#e2eeff",
+                  }}>
+                    {ndtComputed
+                      ? `${ndtComputed.estimated_final_thickness_mm.toFixed(2)} mm`
+                      : "Not available"}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", display: "block", marginBottom: 6 }}>
+                    Corrosion rate (mm/year)
+                  </label>
+                  <div style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    background: "rgba(15,23,42,0.9)",
+                    border: "1px solid rgba(148,163,184,0.45)",
+                    borderRadius: 8,
+                    color: "#e2eeff",
+                  }}>
+                    {ndtData?.corrosion_rate_mmpy?.trim() || "Not provided"}
+                  </div>
+                </div>
+                <p style={{ margin: 0, fontSize: 10, color: "rgba(148,163,184,0.85)", lineHeight: 1.4 }}>
+                  Demo NDT uses a fixed 1.0% reduction. Replace with sensor-backed/backend logic later.
+                </p>
               </div>
             </div>
 

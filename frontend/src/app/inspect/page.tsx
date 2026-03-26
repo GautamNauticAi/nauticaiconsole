@@ -4,7 +4,8 @@ import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageShell } from "@/components/PageShell";
 import { api } from "@/lib/api";
-import type { AgenticInspectResponse } from "@/types";
+import type { AgenticInspectResponse, NdtInputData } from "@/types";
+import { saveNdtForVessel } from "@/lib/ndt";
 
 type Stage = "idle" | "selected" | "uploading" | "processing" | "done" | "error";
 
@@ -71,6 +72,9 @@ export default function InspectPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [vesselName, setVesselName] = useState("");
   const [notes, setNotes] = useState("");
+  const [ndtThickness, setNdtThickness] = useState("");
+  const [ndtCorrosionRate, setNdtCorrosionRate] = useState("");
+  const [ndtLocationId, setNdtLocationId] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
@@ -126,10 +130,15 @@ export default function InspectPage() {
     const results: AgenticInspectResponse[] = [];
     let lastError: string | null = null;
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
+    const ndtData: NdtInputData = {
+      thickness_mm: ndtThickness.trim(),
+      corrosion_rate_mmpy: ndtCorrosionRate.trim(),
+      location_id: ndtLocationId.trim(),
+    };
     if (files.length > 1) {
       setProgress(50);
       try {
-        const batchResults = await api.uploadBatch(Array.from(files), vesselId);
+        const batchResults = await api.uploadBatch(Array.from(files), vesselId, ndtData);
         results.push(...batchResults);
       } catch (err) {
         lastError = err instanceof Error ? err.message : "Batch upload failed";
@@ -139,7 +148,7 @@ export default function InspectPage() {
         setCurrentFileIndex(i + 1);
         setProgress(Math.round(((i + 0.5) / total) * 90));
         try {
-          const res = await api.upload(files[i], vesselId, i);
+          const res = await api.upload(files[i], vesselId, i, ndtData);
           results.push(res);
         } catch (err) {
           lastError = err instanceof Error ? err.message : "Upload failed";
@@ -159,8 +168,10 @@ export default function InspectPage() {
     if (typeof window !== "undefined") {
       window.sessionStorage.setItem("nauticai:lastAgenticInspection", JSON.stringify(results[0]));
       window.sessionStorage.setItem("nauticai:lastAgenticInspectionBatch", JSON.stringify(results));
+      window.sessionStorage.setItem("nauticai:lastInspectionNdt", JSON.stringify(ndtData));
     }
     const firstId = results[0].metadata.vessel_id;
+    saveNdtForVessel(firstId, ndtData, results[0]);
     const query = results.length > 1 ? "?source=live&batch=1" : "?source=live";
     setTimeout(() => {
       router.push(`/results/${encodeURIComponent(firstId)}${query}`);
@@ -173,6 +184,9 @@ export default function InspectPage() {
     setPreview(null);
     setVesselName("");
     setNotes("");
+    setNdtThickness("");
+    setNdtCorrosionRate("");
+    setNdtLocationId("");
     setProgress(0);
     setErrMsg("");
   };
@@ -477,6 +491,36 @@ export default function InspectPage() {
                       flex: 1,
                       minHeight: 0,
                     }}
+                  />
+                </div>
+
+                <div style={{ flexShrink: 0 }}>
+                  <label style={LABEL}>NDT Thickness (mm)</label>
+                  <input
+                    value={ndtThickness}
+                    onChange={(e) => setNdtThickness(e.target.value)}
+                    placeholder="e.g. 12.4"
+                    style={INPUT_BASE}
+                  />
+                </div>
+
+                <div style={{ flexShrink: 0 }}>
+                  <label style={LABEL}>NDT Corrosion Rate (mm/year)</label>
+                  <input
+                    value={ndtCorrosionRate}
+                    onChange={(e) => setNdtCorrosionRate(e.target.value)}
+                    placeholder="e.g. 0.3"
+                    style={INPUT_BASE}
+                  />
+                </div>
+
+                <div style={{ flexShrink: 0 }}>
+                  <label style={LABEL}>NDT Location ID</label>
+                  <input
+                    value={ndtLocationId}
+                    onChange={(e) => setNdtLocationId(e.target.value)}
+                    placeholder="e.g. A12"
+                    style={INPUT_BASE}
                   />
                 </div>
               </div>

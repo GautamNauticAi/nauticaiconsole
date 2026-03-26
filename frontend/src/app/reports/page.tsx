@@ -245,12 +245,13 @@ export default function ReportsPage() {
                 <col style={{ width: "10%" }} />
                 <col style={{ width: "8%" }} />
                 <col style={{ width: "8%" }} />
+                <col style={{ width: "12%" }} />
                 <col style={{ width: "10%" }} />
-                <col style={{ width: "26%", minWidth: 140 }} />
+                <col style={{ width: "14%", minWidth: 140 }} />
               </colgroup>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(129,140,248,0.2)", background: "rgba(15,23,42,0.6)" }}>
-                  {["Vessel", "Images", "Date", "Anomalies", "Severity", "Risk", "Status", "Actions"].map((h) => (
+                  {["Vessel", "Images", "Date", "Anomalies", "Severity", "Risk", "NDT thickness (Demo)", "Status", "Actions"].map((h) => (
                     <th key={h} style={{
                       padding: "12px 14px",
                       textAlign: "left",
@@ -268,12 +269,12 @@ export default function ReportsPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
+                    <td colSpan={9} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
                   </tr>
                 )}
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections match your filters.</td>
+                    <td colSpan={9} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections match your filters.</td>
                   </tr>
                 )}
                 {!loading && filtered.map((ins, i) => {
@@ -299,6 +300,11 @@ export default function ReportsPage() {
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: 13, fontWeight: 500, color: "#e2e8f0" }}>
                         {ins.status === "completed" ? numericRisk.toFixed(1) : "—"}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: 12, color: "rgba(226,232,240,0.92)" }}>
+                        {ins.ndt_estimated_final_thickness_mm != null
+                          ? `${ins.ndt_estimated_final_thickness_mm.toFixed(2)} mm${ins.ndt_estimated_loss_percent != null ? ` (sample -${ins.ndt_estimated_loss_percent.toFixed(1)}%)` : ""}`
+                          : "—"}
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: 12, color: "#94a3b8", textTransform: "capitalize" }}>{ins.status}</td>
                       <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>

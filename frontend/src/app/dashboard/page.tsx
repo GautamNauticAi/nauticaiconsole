@@ -296,9 +296,10 @@ export default function Dashboard() {
                   <col style={{ width: "8%" }} />
                   <col style={{ width: "10%" }} />
                   <col style={{ width: "14%" }} />
-                  <col style={{ width: "10%" }} />
                   <col style={{ width: "14%" }} />
-                  <col style={{ width: "26%", minWidth: 140 }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "24%", minWidth: 140 }} />
                 </colgroup>
                 <thead>
                   <tr style={{ borderBottom: "1px solid rgba(129,140,248,0.2)", background: "rgba(15,23,42,0.6)" }}>
@@ -307,6 +308,7 @@ export default function Dashboard() {
                       { label: "Images", align: "center" as const },
                       { label: "Anomalies", align: "center" as const },
                       { label: "Risk", align: "center" as const },
+                      { label: "NDT thickness (Demo)", align: "center" as const },
                       { label: "Status", align: "center" as const },
                       { label: "Date", align: "left" as const },
                       { label: "Actions", align: "right" as const },
@@ -331,12 +333,12 @@ export default function Dashboard() {
                 <tbody>
                   {effectiveInspections.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={7} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
+                      <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
                     </tr>
                   )}
                   {loading && (
                     <tr>
-                      <td colSpan={7} style={{ padding: "32px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
+                      <td colSpan={8} style={{ padding: "32px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
                     </tr>
                   )}
                   {!loading && effectiveInspections.map((ins, i) => (
@@ -367,6 +369,18 @@ export default function Dashboard() {
                             return <RiskBadge score={numeric} />;
                           })()
                         ) : <span style={{ color: "#64748b", fontSize: 12 }}>—</span>}
+                      </td>
+                      <td style={{ padding: "12px 14px", textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: "#e2e8f0" }}>
+                          {ins.ndt_estimated_final_thickness_mm != null
+                            ? `${ins.ndt_estimated_final_thickness_mm.toFixed(2)} mm`
+                            : "—"}
+                        </span>
+                        {ins.ndt_estimated_loss_percent != null && (
+                          <div style={{ fontSize: 10, color: "rgba(148,163,184,0.9)", marginTop: 2 }}>
+                            sample -{ins.ndt_estimated_loss_percent.toFixed(1)}%
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "center" }}>
                         <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8", textTransform: "capitalize" }}>{ins.status}</span>
