@@ -7,6 +7,8 @@
 # API endpoints for the UI Dashboard.
 # ==========================================
 
+from __future__ import annotations
+
 import os
 import sys
 import json
@@ -16,6 +18,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import List, Optional, Tuple
 from fpdf import FPDF
 import uvicorn
 try:
@@ -67,7 +70,7 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL") or "http://localhost:3000"
 class AuthPayload(BaseModel):
     email: str
     password: str
-    username: str | None = None  # required at signup; ignored at login
+    username: Optional[str] = None  # required at signup; ignored at login
 
 class ForgotPayload(BaseModel):
     email: str
@@ -76,7 +79,7 @@ class ResetPayload(BaseModel):
     token: str
     new_password: str
 
-def _hash_password(password: str) -> tuple[str, str]:
+def _hash_password(password: str) -> Tuple[str, str]:
     salt = secrets.token_hex(16)
     digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
     return salt, digest
@@ -107,7 +110,7 @@ def _create_session(user_id: int) -> str:
         if conn is not None:
             conn.close()
 
-def _get_user_from_token(token: str) -> dict | None:
+def _get_user_from_token(token: str) -> Optional[dict]:
     if not POSTGRES_DSN or psycopg2 is None:
         return None
     conn = None
@@ -131,7 +134,7 @@ def _get_user_from_token(token: str) -> dict | None:
         if conn is not None:
             conn.close()
 
-def _require_auth(authorization: str | None) -> dict:
+def _require_auth(authorization: Optional[str]) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     token = authorization.split(" ", 1)[1].strip()
@@ -149,7 +152,7 @@ def _create_reset_token(user_id: int) -> str:
         algorithm="HS256",
     )
 
-def _verify_reset_token(token: str) -> int | None:
+def _verify_reset_token(token: str) -> Optional[int]:
     if not pyjwt:
         return None
     try:
@@ -567,7 +570,7 @@ async def telegram_validate(username: str):
             conn.close()
 
 
-def _user_id_from_username(conn, username: str) -> int | None:
+def _user_id_from_username(conn, username: str) -> Optional[int]:
     """Resolve username to user id. Returns None if not found."""
     u = (username or "").strip().lower()
     if not u:
@@ -777,7 +780,7 @@ async def auth_login(payload: AuthPayload):
 
 
 @app.get("/auth/me")
-async def auth_me(authorization: str | None = Header(None)):
+async def auth_me(authorization: Optional[str] = Header(None)):
     """Return current user (id, email, username, telegram_user_id) for Dashboard / Telegram setup."""
     user = _require_auth(authorization)
     return {"user": {"id": user["id"], "email": user["email"], "username": user.get("username"), "telegram_user_id": user.get("telegram_user_id")}}
@@ -849,7 +852,7 @@ async def auth_reset_password(payload: ResetPayload):
     return {"ok": True}
 
 
-def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> tuple[dict, str | None]:
+def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> Tuple[dict, Optional[str]]:
     """Run vision pipeline on one image; save per-image JSON and annotated image. Returns (report_payload, dest_annotated_path)."""
     vision_report = vision_pipeline.process_image(temp_image_path)
     coverage = vision_report["coverage_percent"]
@@ -895,8 +898,8 @@ def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, r
 @app.post("/api/inspect/batch")
 async def run_inspection_batch(
     vessel_id: str = Form(..., description="Vessel identifier"),
-    images: list[UploadFile] = File(..., description="One or more hull images"),
-    authorization: str | None = Header(None),
+    images: List[UploadFile] = File(..., description="One or more hull images"),
+    authorization: Optional[str] = Header(None),
 ):
     """Process all images on this instance so annotated images and combined PDF are available."""
     if not images:
@@ -907,8 +910,8 @@ async def run_inspection_batch(
     reports_folder = _reports_folder(uid)
     temp_folder = "temp_uploads"
     os.makedirs(temp_folder, exist_ok=True)
-    report_payloads: list[dict] = []
-    annotated_paths: list[str | None] = []
+    report_payloads: List[dict] = []
+    annotated_paths: List[Optional[str]] = []
     try:
         for idx, image in enumerate(images):
             temp_image_path = os.path.join(temp_folder, image.filename or f"img_{idx}")
@@ -957,7 +960,7 @@ async def run_inspection(
     vessel_id: str = Form(..., description="Vessel identifier"),
     image: UploadFile = File(...),
     image_index: int = Form(0, description="Index of image in batch (0, 1, 2, ...) for multi-image inspection"),
-    authorization: str | None = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Accepts vessel ID and hull image. Saves report under the authenticated user only."""
     user = _require_auth(authorization)
@@ -1009,7 +1012,7 @@ async def run_inspection(
 
 # Get all report payloads for a vessel (for multi-image slider when opening from Dashboard/Reports)
 @app.get("/api/vessel/{vessel_id}/reports")
-async def get_vessel_reports(vessel_id: str, authorization: str | None = Header(None)):
+async def get_vessel_reports(vessel_id: str, authorization: Optional[str] = Header(None)):
     """Returns all per-image reports so the frontend can show the batch slider and correct metrics."""
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
@@ -1021,7 +1024,7 @@ async def get_vessel_reports(vessel_id: str, authorization: str | None = Header(
 
 # Get latest JSON report for a vessel (auth required; only that user's vessel)
 @app.get("/api/vessel/{vessel_id}/latest-report")
-async def get_latest_report(vessel_id: str, authorization: str | None = Header(None)):
+async def get_latest_report(vessel_id: str, authorization: Optional[str] = Header(None)):
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
@@ -1038,7 +1041,7 @@ async def get_latest_report(vessel_id: str, authorization: str | None = Header(N
 
 # Serve annotated image (auth required; only that user's vessel)
 @app.get("/api/vessel/{vessel_id}/annotated-image")
-async def get_annotated_image(vessel_id: str, index: int = 0, authorization: str | None = Header(None)):
+async def get_annotated_image(vessel_id: str, index: int = 0, authorization: Optional[str] = Header(None)):
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
@@ -1055,7 +1058,7 @@ async def get_annotated_image(vessel_id: str, index: int = 0, authorization: str
 
 # Download PDF report for a vessel (auth required; only that user's vessel)
 @app.get("/api/vessel/{vessel_id}/pdf")
-async def download_pdf(vessel_id: str, authorization: str | None = Header(None)):
+async def download_pdf(vessel_id: str, authorization: Optional[str] = Header(None)):
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
@@ -1090,7 +1093,7 @@ async def download_pdf(vessel_id: str, authorization: str | None = Header(None))
 
 
 @app.delete("/api/vessel/{vessel_id}")
-async def delete_vessel(vessel_id: str, authorization: str | None = Header(None)):
+async def delete_vessel(vessel_id: str, authorization: Optional[str] = Header(None)):
     """Delete one inspection (vessel) for the authenticated user. Removes DB rows and all report files."""
     user = _require_auth(authorization)
     uid = user["id"]
@@ -1129,7 +1132,7 @@ def _invalidate_vessels_cache(user_id: int) -> None:
 
 # Get list of all inspected vessels for the authenticated user only
 @app.get("/api/vessels/all")
-async def get_all_vessels(authorization: str | None = Header(None)):
+async def get_all_vessels(authorization: Optional[str] = Header(None)):
     """Returns vessels that this user has inspected (from DB + reports/{user_id}/)."""
     user = _require_auth(authorization)
     uid = user["id"]
