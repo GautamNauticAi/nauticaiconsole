@@ -20,7 +20,8 @@ OUTPUT_DIR = os.environ.get("NAUTICAI_OUTPUT_DIR", "pipeline_outputs")
 # Cap image max side (px) for inference to speed up; 0 = no resize. e.g. 1280 for faster runs.
 MAX_INFERENCE_SIZE = int(os.environ.get("NAUTICAI_MAX_INFERENCE_SIZE", "0") or "0")
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Resolved in load_models() so CUDA is checked when weights load (import-time can be wrong on some Jetsons).
+DEVICE = "cpu"
 
 # Globals set by load_models()
 yolo_model = None
@@ -96,9 +97,10 @@ def get_severity(coverage_percent):
 
 def load_models(yolo_path=None, sam_path=None):
     """Load YOLO and SAM models. Call once before process_image."""
-    global yolo_model, sam_predictor
+    global yolo_model, sam_predictor, DEVICE
     yolo_path = yolo_path or YOLO_MODEL_PATH
     sam_path = sam_path or SAM_CHECKPOINT_PATH
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     if DEVICE == "cpu":
         print("[NautiCAI] Running on CPU – detection will be slower. GPU (CUDA) recommended.")
     yolo_model = YOLO(yolo_path)
