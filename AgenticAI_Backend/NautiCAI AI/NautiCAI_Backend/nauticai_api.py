@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 # Jetson L4T: CUDA libs must be on LD_LIBRARY_PATH *before* torch is imported (via hull_inspection).
@@ -39,13 +40,64 @@ import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+
+def _discover_dotenv_paths() -> list[Path]:
+    """All `.env` files from repo root down to this backend folder (backend wins on duplicate keys)."""
+    found: list[Path] = []
+    p = Path(__file__).resolve().parent
+    for _ in range(14):
+        candidate = p / ".env"
+        if candidate.is_file():
+            found.append(candidate)
+        if p.parent == p:
+            break
+        p = p.parent
+    found.reverse()
+    return found
+
+
+def _apply_minimal_env_file(path: Path) -> None:
+    """If python-dotenv is missing, parse simple KEY=value lines (same idea as .env)."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        key, _, rest = s.partition("=")
+        key = key.strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            continue
+        val = rest.strip()
+        if "#" in val and not (val.startswith('"') or val.startswith("'")):
+            val = val.split("#", 1)[0].strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if val:
+            os.environ[key] = val
+
+
+def _load_all_dotenv() -> None:
+    paths = _discover_dotenv_paths()
+    if not paths:
+        return
+    try:
+        from dotenv import load_dotenv
+
+        for env_path in paths:
+            load_dotenv(env_path, override=True)
+    except ImportError:
+        for env_path in paths:
+            _apply_minimal_env_file(env_path)
+
+
+_load_all_dotenv()
+
 from fpdf import FPDF
 import uvicorn
-try:
-    from dotenv import load_dotenv
-    load_dotenv(Path(__file__).resolve().parent / ".env")
-except ImportError:
-    pass
 try:
     import jwt as pyjwt
 except ImportError:
@@ -75,6 +127,21 @@ try:
 except ImportError:
     psycopg2 = None
     RealDictCursor = None
+
+
+def _require_postgres_for_auth() -> None:
+    """Used by login/signup/session paths — distinct errors for driver vs missing URL."""
+    if psycopg2 is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database driver missing. Run: pip install psycopg2-binary",
+        )
+    if not POSTGRES_DSN:
+        raise HTTPException(
+            status_code=500,
+            detail="Database URL missing. Set POSTGRES_DSN or DATABASE_URL in a .env file (this folder or any parent directory), then restart the API.",
+        )
+
 
 # Auth: Brevo SMTP and password reset
 BREVO_SMTP_USER = (os.environ.get("BREVO_SMTP_USER") or "").strip() or None
@@ -109,8 +176,7 @@ def _verify_password(password: str, salt: str, password_hash: str) -> bool:
     return secrets.compare_digest(digest, password_hash)
 
 def _create_session(user_id: int) -> str:
-    if not POSTGRES_DSN or psycopg2 is None:
-        raise HTTPException(status_code=500, detail="Auth not configured")
+    _require_postgres_for_auth()
     token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=7)
     conn = None
@@ -556,7 +622,11 @@ async def root():
 async def health_check():
     return {
         "status": "healthy",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "database": {
+            "psycopg2": psycopg2 is not None,
+            "postgres_dsn_configured": bool(POSTGRES_DSN),
+        },
     }
 
 
@@ -712,8 +782,7 @@ async def telegram_latest_report(username: str):
 async def auth_signup(payload: AuthPayload):
     """Create account. Requires username (unique). Returns token and user (id, email, username, telegram_user_id)."""
     try:
-        if not POSTGRES_DSN or psycopg2 is None:
-            raise HTTPException(status_code=500, detail="Auth not configured")
+        _require_postgres_for_auth()
         email = (payload.email or "").strip().lower()
         raw_username = (payload.username or "").strip()
         if not email or not (payload.password or ""):
@@ -770,8 +839,7 @@ async def auth_signup(payload: AuthPayload):
 async def auth_login(payload: AuthPayload):
     """Login. Returns token and user (id, email, telegram_user_id)."""
     try:
-        if not POSTGRES_DSN or psycopg2 is None:
-            raise HTTPException(status_code=500, detail="Auth not configured")
+        _require_postgres_for_auth()
         email = (payload.email or "").strip().lower()
         if not email or not (payload.password or ""):
             raise HTTPException(status_code=400, detail="Email and password are required")
