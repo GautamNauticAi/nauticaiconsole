@@ -1,0 +1,24 @@
+# Jetson / L4T: install NVIDIA PyTorch for your JetPack FIRST, then this file.
+# Example (JetPack 5.1.1, Python 3.8):
+#   pip install --no-cache-dir https://developer.download.nvidia.com/compute/redist/jp/v511/pytorch/torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
+# Do not use requirements.txt on Jetson — the bare "torch" line pulls CPU PyPI builds.
+
+# Core
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
+# AI Vision (torch omitted — use NVIDIA wheel)
+ultralytics
+opencv-python
+numpy
+git+https://github.com/facebookresearch/segment-anything.git
+
+# PDF Generation
+fpdf==1.7.2
+
+requests>=2.28.0
+psycopg2-binary>=2.9.0
+PyJWT>=2.0.0
+python-telegram-bot>=21.0
+nest-asyncio==1.5.8
