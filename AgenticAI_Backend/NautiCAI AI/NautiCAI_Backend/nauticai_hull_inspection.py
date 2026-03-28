@@ -3,6 +3,23 @@ NautiCAI – AI Vision pipeline for maritime hull inspection (biofouling detecti
 Uses YOLO for detection + SAM for segmentation → coverage % and severity per image.
 """
 import os
+import sys
+
+# Jetson L4T: CUDA user libs before torch loads.
+if sys.platform.startswith("linux"):
+    for _tegra_path in (
+        "/usr/lib/aarch64-linux-gnu/tegra",
+        "/usr/lib/aarch64-linux-gnu/tegra-egl",
+        "/usr/local/cuda/lib64",
+    ):
+        if _tegra_path and os.path.isdir(_tegra_path):
+            _cur = os.environ.get("LD_LIBRARY_PATH", "")
+            _parts = _cur.split(":") if _cur else []
+            if _tegra_path not in _parts:
+                os.environ["LD_LIBRARY_PATH"] = (
+                    f"{_tegra_path}:{_cur}" if _cur else _tegra_path
+                )
+
 import cv2
 import json
 import torch

@@ -11,6 +11,26 @@ from __future__ import annotations
 
 import os
 import sys
+
+# Jetson L4T: CUDA libs must be on LD_LIBRARY_PATH *before* torch is imported (via hull_inspection).
+def _prepend_ld_library_path(dirpath: str) -> None:
+    if not dirpath or not os.path.isdir(dirpath):
+        return
+    cur = os.environ.get("LD_LIBRARY_PATH", "")
+    parts = cur.split(":") if cur else []
+    if dirpath in parts:
+        return
+    os.environ["LD_LIBRARY_PATH"] = f"{dirpath}:{cur}" if cur else dirpath
+
+
+if sys.platform.startswith("linux"):
+    for _p in (
+        "/usr/lib/aarch64-linux-gnu/tegra",
+        "/usr/lib/aarch64-linux-gnu/tegra-egl",
+        "/usr/local/cuda/lib64",
+    ):
+        _prepend_ld_library_path(_p)
+
 import json
 import shutil
 import uuid
