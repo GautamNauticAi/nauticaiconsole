@@ -148,8 +148,8 @@ export default function InspectPage() {
         setCurrentFileIndex(i + 1);
         setProgress(Math.round(((i + 0.5) / total) * 90));
         try {
-          const res = await api.upload(files[i], vesselId, i, ndtData);
-          results.push(res);
+          const reports = await api.upload(files[i], vesselId, i, ndtData);
+          results.push(...reports);
         } catch (err) {
           lastError = err instanceof Error ? err.message : "Upload failed";
         }

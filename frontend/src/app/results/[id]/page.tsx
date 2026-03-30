@@ -48,31 +48,6 @@ function AnnotatedPreview({
     };
   }, [vesselId, imageIndex]);
 
-  const fallback = (
-    <div
-      style={{
-        height: "min(42vh, 280px)",
-        borderRadius: 10,
-        background: "rgba(15,23,42,0.90)",
-        border: "1px dashed rgba(148,163,184,0.60)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "rgba(186,230,255,0.75)",
-        fontSize: 12,
-        textAlign: "center",
-        padding: "0 16px",
-      }}
-    >
-      <span style={{ fontSize: 28, marginBottom: 8 }}>✓</span>
-      <p style={{ margin: 0 }}>Inspection complete</p>
-      <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(186,230,255,0.6)" }}>
-        Download the official PDF for full details and audit trail.
-      </p>
-    </div>
-  );
-
   if (loading) {
     return (
       <div style={{ minHeight: "min(42vh, 280px)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(186,230,255,0.7)", fontSize: 13 }}>
@@ -80,7 +55,32 @@ function AnnotatedPreview({
       </div>
     );
   }
-  if (imgError || !blobUrl) return fallback;
+  if (imgError || !blobUrl) {
+    return (
+      <div
+        style={{
+          height: "min(42vh, 280px)",
+          borderRadius: 10,
+          background: "rgba(15,23,42,0.90)",
+          border: "1px dashed rgba(148,163,184,0.60)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "rgba(186,230,255,0.75)",
+          fontSize: 12,
+          textAlign: "center",
+          padding: "0 16px",
+        }}
+      >
+        <span style={{ fontSize: 22, marginBottom: 8 }}>✕</span>
+        <p style={{ margin: 0, fontWeight: 600 }}>Preview unavailable</p>
+        <p style={{ margin: "6px 0 0", fontSize: 11, color: "rgba(186,230,255,0.55)", lineHeight: 1.45 }}>
+          This frame could not be loaded (missing file or network). Refresh the page or use Download PDF for the full audit.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <img
@@ -139,6 +139,7 @@ export default function ResultsPage() {
   const [agenticBatch, setAgenticBatch] = useState<AgenticInspectResponse[] | null>(null);
   const [batchIndex, setBatchIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [ndtData, setNdtData] = useState<NdtInputData | null>(null);
 
   const fromLive = searchParams.get("source") === "live";
@@ -265,26 +266,32 @@ export default function ResultsPage() {
             {id && (
               <button
                 type="button"
+                disabled={pdfDownloading}
                 onClick={async () => {
+                  setPdfDownloading(true);
                   try {
                     await api.downloadAgenticPdf(id);
                   } catch (e) {
                     console.error(e);
                     if (typeof window !== "undefined") window.alert("Download failed. Make sure you are logged in.");
+                  } finally {
+                    setPdfDownloading(false);
                   }
                 }}
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: "#a78bfa",
-                  background: "rgba(124,58,237,0.15)",
-                  border: "1px solid rgba(124,58,237,0.35)",
+                  color: pdfDownloading ? "rgba(148,163,184,0.85)" : "#e0f2fe",
+                  background: pdfDownloading ? "rgba(30,41,59,0.85)" : "rgba(56,189,248,0.10)",
+                  border: "1px solid rgba(56,189,248,0.35)",
                   borderRadius: 8,
                   padding: "8px 18px",
-                  cursor: "pointer",
+                  cursor: pdfDownloading ? "wait" : "pointer",
+                  opacity: pdfDownloading ? 0.85 : 1,
+                  boxShadow: pdfDownloading ? "none" : "0 1px 0 rgba(255,255,255,0.06) inset",
                 }}
               >
-                Download PDF
+                {pdfDownloading ? "Downloading…" : "Download PDF"}
               </button>
             )}
             <Link href="/inspect" style={{

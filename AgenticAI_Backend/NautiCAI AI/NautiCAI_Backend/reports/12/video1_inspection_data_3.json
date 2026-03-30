@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "video1",
+        "inspection_timestamp": "2026-03-30 18:16:07",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 0.0,
+        "severity": "Low",
+        "total_detections": 0
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-0 (Clean)",
+        "recommended_action": "No action required.",
+        "requires_cleaning": false
+    }
+}

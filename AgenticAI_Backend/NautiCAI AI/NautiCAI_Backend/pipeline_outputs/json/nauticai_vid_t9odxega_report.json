@@ -1,0 +1,38 @@
+{
+    "image": "nauticai_vid_t9odxega.jpg",
+    "image_path": "C:\\Users\\chara\\AppData\\Local\\Temp\\nauticai_vid_t9odxega.jpg",
+    "image_width": 720,
+    "image_height": 1280,
+    "image_area_pixels": 921600,
+    "num_detections": 1,
+    "total_fouling_pixels": 493219,
+    "coverage_percent": 53.5177,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\nauticai_vid_t9odxega_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\nauticai_vid_t9odxega_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\nauticai_vid_t9odxega_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.6509,
+            "bbox_xyxy": [
+                0,
+                512,
+                720,
+                1273
+            ],
+            "bbox_area_pixels": 547920,
+            "mask_pixels": 493219,
+            "coverage_percent_of_image": 53.5177,
+            "mask_path": "pipeline_outputs\\masks\\nauticai_vid_t9odxega_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\nauticai_vid_t9odxega_crop_0.png",
+            "crop_box_xyxy": [
+                3,
+                531,
+                718,
+                1279
+            ]
+        }
+    ]
+}

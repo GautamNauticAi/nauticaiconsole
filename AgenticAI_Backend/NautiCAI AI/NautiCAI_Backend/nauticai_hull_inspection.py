@@ -3,6 +3,7 @@ NautiCAI – AI Vision pipeline for maritime hull inspection (biofouling detecti
 Uses YOLO for detection + SAM for segmentation → coverage % and severity per image.
 """
 import os
+import platform
 import sys
 
 # Jetson L4T: CUDA user libs before torch loads.
@@ -22,8 +23,31 @@ if sys.platform.startswith("linux"):
 
 import cv2
 import json
+import tempfile
 import torch
 import numpy as np
+
+
+def _is_jetson_like() -> bool:
+    """
+    Jetson / Tegra edge devices need fewer video frames and smaller tensors than a desktop GPU server.
+    Override with NAUTICAI_DEVICE_PROFILE=jetson|server|desktop.
+    """
+    prof = (os.environ.get("NAUTICAI_DEVICE_PROFILE") or "").strip().lower()
+    if prof == "jetson":
+        return True
+    if prof in ("server", "desktop", "gpu"):
+        return False
+    if os.path.isfile("/etc/nv_tegra_release"):
+        return True
+    if platform.machine() != "aarch64":
+        return False
+    try:
+        with open("/proc/device-tree/model", "rb") as f:
+            model = f.read().decode("utf-8", errors="ignore").lower()
+        return "jetson" in model or "tegra" in model
+    except OSError:
+        return False
 
 
 def _patch_torchvision_nms_if_broken() -> None:
@@ -358,6 +382,102 @@ def process_image(image_path, conf=0.25, output_dir=None):
 
     print(f"Done: {file_name} | Detections: {len(detections_data)} | Coverage: {coverage_percent:.2f}% | Severity: {severity}")
     return report
+
+
+def extract_video_frame_paths(video_path: str) -> list:
+    """
+    Sample JPEG frame paths from a video for inspection. Caller must delete each path after use.
+    Uses sequential decode + stride from FPS × NAUTICAI_VIDEO_FRAME_INTERVAL_SEC.
+
+    Jetson defaults (when env vars are unset and device is detected as Jetson/Tegra):
+    fewer frames, longer interval, downscale frames — YOLO+SAM per frame is heavy on Xavier/Orin Nano.
+
+    Env:
+      NAUTICAI_VIDEO_MAX_FRAMES — cap sampled frames (default 6 Jetson / 10 else, max 60).
+      NAUTICAI_VIDEO_FRAME_INTERVAL_SEC — seconds between samples (default 2.5 Jetson / 1.5 else).
+      NAUTICAI_VIDEO_MAX_SIDE — if > 0, resize frame so max(width,height) <= this (default 1280 Jetson / 0=off else).
+      NAUTICAI_DEVICE_PROFILE — jetson | server | desktop (overrides auto-detection).
+    """
+    jetson = _is_jetson_like()
+
+    raw_mf = os.environ.get("NAUTICAI_VIDEO_MAX_FRAMES")
+    if raw_mf is not None and str(raw_mf).strip() != "":
+        max_frames = int(raw_mf)
+    else:
+        max_frames = 6 if jetson else 10
+    max_frames = max(1, min(max_frames, 60))
+
+    raw_iv = os.environ.get("NAUTICAI_VIDEO_FRAME_INTERVAL_SEC")
+    if raw_iv is not None and str(raw_iv).strip() != "":
+        interval_sec = float(raw_iv)
+    else:
+        interval_sec = 2.5 if jetson else 1.5
+    if interval_sec <= 0:
+        interval_sec = 2.5 if jetson else 1.5
+
+    raw_side = os.environ.get("NAUTICAI_VIDEO_MAX_SIDE")
+    if raw_side is not None and str(raw_side).strip() != "":
+        max_side = int(raw_side)
+    else:
+        max_side = 1280 if jetson else 0
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path!r}")
+
+    if jetson:
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    if fps <= 0.1:
+        fps = 25.0
+    frame_stride = max(1, int(round(fps * interval_sec)))
+
+    out = []
+    frame_idx = 0
+    try:
+        while len(out) < max_frames:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
+            if frame_idx % frame_stride == 0:
+                if max_side > 0:
+                    h, w = frame.shape[:2]
+                    m = max(h, w)
+                    if m > max_side:
+                        scale = max_side / float(m)
+                        frame = cv2.resize(
+                            frame,
+                            (int(round(w * scale)), int(round(h * scale))),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="nauticai_vid_")
+                os.close(fd)
+                jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), 88]
+                if not cv2.imwrite(tmp_path, frame, jpeg_params) and not cv2.imwrite(
+                    tmp_path, frame
+                ):
+                    os.unlink(tmp_path)
+                    raise ValueError("Failed to write extracted video frame to disk.")
+                out.append(tmp_path)
+            frame_idx += 1
+    finally:
+        cap.release()
+
+    if jetson and out:
+        print(
+            f"[NautiCAI] Video: sampled {len(out)} frame(s), stride≈{frame_stride}f, "
+            f"interval={interval_sec}s, max_side={max_side or 'off'}"
+        )
+
+    if not out:
+        raise ValueError(
+            "No frames could be read from the video (empty, corrupt, or unsupported codec)."
+        )
+    return out
 
 
 def run_pipeline(input_source, output_dir=None, conf=0.25, yolo_path=None, sam_path=None):

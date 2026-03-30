@@ -35,6 +35,8 @@ if sys.platform.startswith("linux"):
 import json
 import shutil
 import traceback
+
+import cv2
 import uuid
 import hashlib
 import secrets
@@ -559,7 +561,12 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
                 pdf.add_page()
                 pdf.set_font('Arial', '', 9)
                 pdf.set_text_color(80, 80, 80)
-                pdf.cell(0, 6, _pdf_safe(f"  Annotated result - Image {idx + 1} of {n}"), 0, 1, 'L')
+                cap = f"  Inspection frame — Image {idx + 1} of {n}"
+                if detections == 0:
+                    cap += " (no fouling detected; hull preview)"
+                else:
+                    cap += " (annotated)"
+                pdf.cell(0, 6, _pdf_safe(cap), 0, 1, 'L')
                 pdf.ln(2)
                 pdf.image(annotated_paths[idx], x=10, w=190)
                 pdf.ln(4)
@@ -942,15 +949,22 @@ async def auth_reset_password(payload: ResetPayload):
 
 
 _ALLOWED_UPLOAD_EXT = {".jpg", ".jpeg", ".jpe", ".png", ".webp", ".bmp"}
+_VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
 def _safe_temp_upload_path(temp_folder: str, original_filename: Optional[str]) -> str:
     """Avoid spaces/special chars in WhatsApp-style names breaking OpenCV or shell paths on Linux/Jetson."""
     ext = Path(original_filename or "upload.jpg").suffix.lower()
-    if ext not in _ALLOWED_UPLOAD_EXT:
+    if ext in _VIDEO_EXT:
+        pass
+    elif ext not in _ALLOWED_UPLOAD_EXT:
         ext = ".jpg"
     os.makedirs(temp_folder, exist_ok=True)
     return os.path.join(temp_folder, f"{uuid.uuid4().hex}{ext}")
+
+
+def _is_video_path(path: str) -> bool:
+    return Path(path).suffix.lower() in _VIDEO_EXT
 
 
 def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> Tuple[dict, Optional[str]]:
@@ -979,13 +993,29 @@ def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, r
         }
     }
     annotated_path = vision_report.get("annotated_path")
-    dest_annotated = None
+    if image_index <= 0:
+        dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
+    else:
+        dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated_{image_index}.jpg")
+
     if annotated_path and os.path.isfile(annotated_path):
-        if image_index <= 0:
-            dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
-        else:
-            dest_annotated = os.path.join(reports_folder, f"{vessel_id}_annotated_{image_index}.jpg")
         shutil.copy2(annotated_path, dest_annotated)
+    elif os.path.isfile(temp_image_path):
+        # Zero detections: no YOLO/SAM overlay — still save hull frame for Results + PDF pages
+        img = cv2.imread(temp_image_path)
+        if img is not None:
+            if not cv2.imwrite(dest_annotated, img, [int(cv2.IMWRITE_JPEG_QUALITY), 92]):
+                try:
+                    shutil.copy2(temp_image_path, dest_annotated)
+                except OSError:
+                    dest_annotated = None
+        else:
+            try:
+                shutil.copy2(temp_image_path, dest_annotated)
+            except OSError:
+                dest_annotated = None
+    else:
+        dest_annotated = None
     per_image_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_{image_index}.json")
     with open(per_image_path, "w") as f:
         json.dump(report_payload, f, indent=4)
@@ -1014,15 +1044,35 @@ async def run_inspection_batch(
     report_payloads: List[dict] = []
     annotated_paths: List[Optional[str]] = []
     try:
-        for idx, image in enumerate(images):
+        idx = 0
+        for image in images:
             temp_image_path = _safe_temp_upload_path(temp_folder, image.filename)
             with open(temp_image_path, "wb") as buffer:
                 shutil.copyfileobj(image.file, buffer)
-            payload, ann_path = _process_one_image(temp_image_path, vessel_id, idx, reports_folder)
-            report_payloads.append(payload)
-            annotated_paths.append(ann_path)
-            if os.path.isfile(temp_image_path):
-                os.remove(temp_image_path)
+            try:
+                if _is_video_path(temp_image_path):
+                    frame_paths = vision_pipeline.extract_video_frame_paths(temp_image_path)
+                    try:
+                        for fp in frame_paths:
+                            payload, ann_path = _process_one_image(fp, vessel_id, idx, reports_folder)
+                            report_payloads.append(payload)
+                            annotated_paths.append(ann_path)
+                            idx += 1
+                            if os.path.isfile(fp):
+                                os.remove(fp)
+                    except Exception:
+                        for fp in frame_paths:
+                            if os.path.isfile(fp):
+                                os.remove(fp)
+                        raise
+                else:
+                    payload, ann_path = _process_one_image(temp_image_path, vessel_id, idx, reports_folder)
+                    report_payloads.append(payload)
+                    annotated_paths.append(ann_path)
+                    idx += 1
+            finally:
+                if os.path.isfile(temp_image_path):
+                    os.remove(temp_image_path)
         if len(report_payloads) > 1:
             create_combined_pdf(vessel_id, report_payloads, reports_folder, annotated_paths)
         else:
@@ -1036,7 +1086,7 @@ async def run_inspection_batch(
                 with conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
-                        (uid, vessel_id, ts_utc, len(images)),
+                        (uid, vessel_id, ts_utc, len(report_payloads)),
                     )
                 conn.commit()
                 conn.close()
@@ -1078,8 +1128,41 @@ async def run_inspection(
         with open(temp_image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
 
-        report_payload, dest_annotated = _process_one_image(temp_image_path, vessel_id, image_index, reports_folder)
-        create_pdf(vessel_id, report_payload, reports_folder, annotated_path=dest_annotated)
+        report_payloads: List[dict] = []
+        annotated_paths: List[Optional[str]] = []
+        frame_paths: List[str] = []
+        try:
+            if _is_video_path(temp_image_path):
+                frame_paths = vision_pipeline.extract_video_frame_paths(temp_image_path)
+                for i, fp in enumerate(frame_paths):
+                    payload, ann_path = _process_one_image(
+                        fp, vessel_id, image_index + i, reports_folder
+                    )
+                    report_payloads.append(payload)
+                    annotated_paths.append(ann_path)
+            else:
+                payload, ann_path = _process_one_image(
+                    temp_image_path, vessel_id, image_index, reports_folder
+                )
+                report_payloads.append(payload)
+                annotated_paths.append(ann_path)
+
+            if len(report_payloads) > 1:
+                create_combined_pdf(vessel_id, report_payloads, reports_folder, annotated_paths)
+            else:
+                create_pdf(
+                    vessel_id,
+                    report_payloads[0],
+                    reports_folder,
+                    annotated_path=annotated_paths[0] if annotated_paths else None,
+                )
+        finally:
+            for fp in frame_paths:
+                if os.path.isfile(fp):
+                    os.remove(fp)
+            if os.path.isfile(temp_image_path):
+                os.remove(temp_image_path)
+
         _invalidate_vessels_cache(uid)
 
         if POSTGRES_DSN and psycopg2 is not None:
@@ -1090,7 +1173,7 @@ async def run_inspection(
                 with conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
-                        (uid, vessel_id, ts_utc, 1),
+                        (uid, vessel_id, ts_utc, len(report_payloads)),
                     )
                 conn.commit()
                 conn.close()
@@ -1100,13 +1183,13 @@ async def run_inspection(
         if telegram_notify:
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
-                telegram_notify.send_inspection_result(vessel_id, report_payload, pdf_path)
+                telegram_notify.send_inspection_result(
+                    vessel_id, report_payloads[0], pdf_path
+                )
             except Exception:
                 pass
 
-        if os.path.isfile(temp_image_path):
-            os.remove(temp_image_path)
-        return JSONResponse(content=report_payload)
+        return JSONResponse(content={"reports": report_payloads})
 
     except HTTPException:
         raise

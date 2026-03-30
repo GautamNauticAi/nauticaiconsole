@@ -131,21 +131,31 @@ export const api = {
     form.append("vessel_id", vesselId);
     form.append("image", imageFile);
 
-    const res = await req<AgenticInspectResponse>("/api/inspect", {
-      method: "POST",
-      body: form,
-    });
+    const headers = new Headers();
+    const auth = getAuthHeaders();
+    if (auth && typeof auth === "object" && "Authorization" in auth) {
+      headers.set("Authorization", (auth as Record<string, string>)["Authorization"]);
+    }
+    const res = await fetch(`${BASE}/api/inspect`, { method: "POST", body: form, headers });
     invalidateInspectionsCache();
-    return res;
+    if (!res.ok) throw new Error(`API error ${res.status}: /api/inspect`);
+    const data = (await res.json()) as { reports?: AgenticInspectResponse[] } | AgenticInspectResponse;
+    const reports = Array.isArray((data as { reports?: AgenticInspectResponse[] }).reports)
+      ? (data as { reports: AgenticInspectResponse[] }).reports
+      : [data as AgenticInspectResponse];
+    return reports[0];
   },
 
-  /** Upload: uses Agentic POST /api/inspect. vesselId defaults to inspection_<timestamp>. imageIndex for batch (0, 1, 2, ...). */
+  /**
+   * POST /api/inspect: one report per image, or one per sampled video frame.
+   * vesselId defaults to inspection_<timestamp>. imageIndex is the starting index when uploading multiple files in sequence.
+   */
   async upload(
     file: File,
     vesselName?: string,
     imageIndex?: number,
     ndtData?: NdtInputData
-  ): Promise<AgenticInspectResponse> {
+  ): Promise<AgenticInspectResponse[]> {
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     const form = new FormData();
     form.append("vessel_id", vesselId);
@@ -162,12 +172,22 @@ export const api = {
     if (imageIndex != null && imageIndex > 0) {
       form.append("image_index", String(imageIndex));
     }
-    const res = await req<AgenticInspectResponse>("/api/inspect", {
-      method: "POST",
-      body: form,
-    });
+    const headers = new Headers();
+    const auth = getAuthHeaders();
+    if (auth && typeof auth === "object" && "Authorization" in auth) {
+      headers.set("Authorization", (auth as Record<string, string>)["Authorization"]);
+    }
+    const res = await fetch(`${BASE}/api/inspect`, { method: "POST", body: form, headers });
     invalidateInspectionsCache();
-    return res;
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { detail?: string })?.detail ?? `Upload failed: ${res.status}`);
+    }
+    const data = (await res.json()) as { reports?: AgenticInspectResponse[] } | AgenticInspectResponse;
+    if (Array.isArray((data as { reports?: AgenticInspectResponse[] }).reports)) {
+      return (data as { reports: AgenticInspectResponse[] }).reports;
+    }
+    return [data as AgenticInspectResponse];
   },
 
   /** Batch upload: one request with all images so one backend instance has all files (fixes multi-image annotated + PDF on Cloud Run). */

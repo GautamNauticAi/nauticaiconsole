@@ -1,0 +1,38 @@
+{
+    "image": "nauticai_vid_ofgldhts.jpg",
+    "image_path": "C:\\Users\\chara\\AppData\\Local\\Temp\\nauticai_vid_ofgldhts.jpg",
+    "image_width": 720,
+    "image_height": 1280,
+    "image_area_pixels": 921600,
+    "num_detections": 1,
+    "total_fouling_pixels": 11155,
+    "coverage_percent": 1.2104,
+    "severity": "Low",
+    "annotated_path": "pipeline_outputs\\annotated\\nauticai_vid_ofgldhts_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\nauticai_vid_ofgldhts_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\nauticai_vid_ofgldhts_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.3256,
+            "bbox_xyxy": [
+                188,
+                238,
+                273,
+                472
+            ],
+            "bbox_area_pixels": 19890,
+            "mask_pixels": 11155,
+            "coverage_percent_of_image": 1.2104,
+            "mask_path": "pipeline_outputs\\masks\\nauticai_vid_ofgldhts_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\nauticai_vid_ofgldhts_crop_0.png",
+            "crop_box_xyxy": [
+                195,
+                231,
+                267,
+                465
+            ]
+        }
+    ]
+}

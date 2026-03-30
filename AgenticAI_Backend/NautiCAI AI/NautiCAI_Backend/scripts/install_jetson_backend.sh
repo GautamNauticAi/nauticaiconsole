@@ -26,3 +26,4 @@ pip install matplotlib pyyaml scipy pillow psutil polars ultralytics-thop
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.version.cuda)"
 
 echo "==> Done. Start API: python nauticai_api.py"
+echo "    Optional: cp .env.jetson.example .env  # Jetson-tuned NAUTICAI_* defaults + comments"
