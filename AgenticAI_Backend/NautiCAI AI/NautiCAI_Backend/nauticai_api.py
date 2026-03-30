@@ -34,6 +34,7 @@ if sys.platform.startswith("linux"):
 
 import json
 import shutil
+import traceback
 import uuid
 import hashlib
 import secrets
@@ -940,6 +941,18 @@ async def auth_reset_password(payload: ResetPayload):
     return {"ok": True}
 
 
+_ALLOWED_UPLOAD_EXT = {".jpg", ".jpeg", ".jpe", ".png", ".webp", ".bmp"}
+
+
+def _safe_temp_upload_path(temp_folder: str, original_filename: Optional[str]) -> str:
+    """Avoid spaces/special chars in WhatsApp-style names breaking OpenCV or shell paths on Linux/Jetson."""
+    ext = Path(original_filename or "upload.jpg").suffix.lower()
+    if ext not in _ALLOWED_UPLOAD_EXT:
+        ext = ".jpg"
+    os.makedirs(temp_folder, exist_ok=True)
+    return os.path.join(temp_folder, f"{uuid.uuid4().hex}{ext}")
+
+
 def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> Tuple[dict, Optional[str]]:
     """Run vision pipeline on one image; save per-image JSON and annotated image. Returns (report_payload, dest_annotated_path)."""
     vision_report = vision_pipeline.process_image(temp_image_path)
@@ -1002,7 +1015,7 @@ async def run_inspection_batch(
     annotated_paths: List[Optional[str]] = []
     try:
         for idx, image in enumerate(images):
-            temp_image_path = os.path.join(temp_folder, image.filename or f"img_{idx}")
+            temp_image_path = _safe_temp_upload_path(temp_folder, image.filename)
             with open(temp_image_path, "wb") as buffer:
                 shutil.copyfileobj(image.file, buffer)
             payload, ann_path = _process_one_image(temp_image_path, vessel_id, idx, reports_folder)
@@ -1038,7 +1051,10 @@ async def run_inspection_batch(
         return JSONResponse(content={"reports": report_payloads})
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1057,8 +1073,7 @@ async def run_inspection(
     reports_folder = _reports_folder(uid)
     try:
         temp_folder = "temp_uploads"
-        os.makedirs(temp_folder, exist_ok=True)
-        temp_image_path = os.path.join(temp_folder, image.filename or "image")
+        temp_image_path = _safe_temp_upload_path(temp_folder, image.filename)
 
         with open(temp_image_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
@@ -1095,7 +1110,10 @@ async def run_inspection(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # Get all report payloads for a vessel (for multi-image slider when opening from Dashboard/Reports)

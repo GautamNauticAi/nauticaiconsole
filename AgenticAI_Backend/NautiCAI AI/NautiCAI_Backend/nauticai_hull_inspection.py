@@ -150,8 +150,10 @@ def process_image(image_path, conf=0.25, output_dir=None):
 
     image_bgr = cv2.imread(image_path)
     if image_bgr is None:
-        print(f"Skipping unreadable image: {image_path}")
-        return None
+        raise ValueError(
+            f"Could not read image (OpenCV imread failed): {image_path!r}. "
+            "Use JPEG or PNG; avoid broken paths. On Linux, spaces/special names in temp paths can fail — API should save uploads with a safe filename."
+        )
 
     h0, w0 = image_bgr.shape[:2]
     scale = 1.0
@@ -303,9 +305,12 @@ def run_pipeline(input_source, output_dir=None, conf=0.25, yolo_path=None, sam_p
     print(f"Total images found: {len(paths)}")
     all_reports = []
     for img_path in paths:
-        report = process_image(img_path, conf=conf, output_dir=out)
-        if report is not None:
-            all_reports.append(report)
+        try:
+            report = process_image(img_path, conf=conf, output_dir=out)
+        except ValueError as e:
+            print(f"Skip {img_path}: {e}")
+            continue
+        all_reports.append(report)
 
     summary_path = os.path.join(out, "summary.json")
     with open(summary_path, "w") as f:
