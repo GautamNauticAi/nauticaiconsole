@@ -25,6 +25,76 @@ import json
 import torch
 import numpy as np
 
+
+def _patch_torchvision_nms_if_broken() -> None:
+    """
+    Ultralytics YOLO calls torchvision.ops.nms (and sometimes batched_nms). On Jetson,
+    PyPI torchvision is built for stock PyTorch; NVIDIA's torch wheel breaks C++ ops.
+    Install pure-Python fallbacks when the default ops fail to load.
+    """
+    try:
+        import torchvision.ops as _tv_ops
+
+        _b = torch.tensor([[0.0, 0.0, 1.0, 1.0], [0.1, 0.1, 1.1, 1.1]], dtype=torch.float32)
+        _s = torch.tensor([0.9, 0.8], dtype=torch.float32)
+        _tv_ops.nms(_b, _s, 0.5)
+    except Exception:
+        import torchvision.ops as _tv_ops
+
+        def _nms_pure_torch(
+            boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float
+        ) -> torch.Tensor:
+            if boxes.numel() == 0:
+                return torch.empty((0,), dtype=torch.long, device=boxes.device)
+            x1, y1, x2, y2 = boxes.unbind(dim=1)
+            areas = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
+            order = scores.argsort(descending=True)
+            keep = []
+            while order.numel() > 0:
+                i = order[0]
+                keep.append(i)
+                if order.numel() == 1:
+                    break
+                rest = order[1:]
+                xx1 = x1[rest].clamp(min=x1[i])
+                yy1 = y1[rest].clamp(min=y1[i])
+                xx2 = x2[rest].clamp(max=x2[i])
+                yy2 = y2[rest].clamp(max=y2[i])
+                inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
+                iou = inter / (areas[i] + areas[rest] - inter + 1e-7)
+                order = rest[iou <= iou_threshold]
+
+            return torch.stack(keep) if keep else torch.empty(0, dtype=torch.long, device=boxes.device)
+
+        def _batched_nms_pure_torch(
+            boxes: torch.Tensor,
+            scores: torch.Tensor,
+            idxs: torch.Tensor,
+            iou_threshold: float,
+        ) -> torch.Tensor:
+            if boxes.numel() == 0:
+                return torch.empty((0,), dtype=torch.long, device=boxes.device)
+            out = []
+            for c in torch.unique(idxs):
+                m = idxs == c
+                b = boxes[m]
+                s = scores[m]
+                orig = torch.nonzero(m, as_tuple=False).squeeze(1)
+                sub = _nms_pure_torch(b, s, iou_threshold)
+                out.append(orig[sub])
+            if not out:
+                return torch.empty((0,), dtype=torch.long, device=boxes.device)
+            return torch.cat(out)
+
+        _tv_ops.nms = _nms_pure_torch  # type: ignore[assignment]
+        _tv_ops.batched_nms = _batched_nms_pure_torch  # type: ignore[assignment]
+        print(
+            "[NautiCAI] torchvision.ops NMS unavailable (Jetson/torch mismatch); using PyTorch fallbacks."
+        )
+
+
+_patch_torchvision_nms_if_broken()
+
 from ultralytics import YOLO
 from segment_anything import sam_model_registry, SamPredictor
 
