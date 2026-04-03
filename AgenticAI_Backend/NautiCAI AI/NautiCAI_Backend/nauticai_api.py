@@ -634,10 +634,9 @@ async def root():
         "message": "NautiCAI Automated Hull Inspection System is running."
     }
 
-# Health check
-@app.get("/health")
-async def health_check():
-    return {
+def _health_payload() -> dict:
+    """Shared JSON for /health and /api/health (load balancers often probe /api/health)."""
+    out: dict = {
         "status": "healthy",
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "database": {
@@ -645,6 +644,29 @@ async def health_check():
             "postgres_dsn_configured": bool(POSTGRES_DSN),
         },
     }
+    try:
+        import torch
+
+        cuda_ok = bool(torch.cuda.is_available())
+        out["cuda"] = {
+            "available": cuda_ok,
+            "device": torch.cuda.get_device_name(0) if cuda_ok else None,
+            "torch_version": str(torch.__version__),
+        }
+    except Exception:
+        out["cuda"] = {"available": False, "device": None, "torch_version": None}
+    return out
+
+
+@app.get("/health")
+async def health_check():
+    return _health_payload()
+
+
+@app.get("/api/health")
+async def api_health_check():
+    """Same as /health; avoids 404 when probes use the /api/* prefix."""
+    return _health_payload()
 
 
 # Telegram bot: validate by username only (single source for who is accessing reports)
