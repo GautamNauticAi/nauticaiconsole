@@ -1,0 +1,86 @@
+# ============================================================
+# NautiCAI OpenClaw Watcher — Systemd Service
+# Version: 1.0.0
+#
+# This file makes the OpenClaw watcher start automatically
+# every time the Jetson boots. It also auto-restarts the
+# watcher if it crashes for any reason.
+#
+# Installation on Jetson:
+#   1. Copy this file to systemd:
+#      sudo cp openclaw/nauticai-watcher.service /etc/systemd/system/
+#
+#   2. Reload systemd:
+#      sudo systemctl daemon-reload
+#
+#   3. Enable auto-start on boot:
+#      sudo systemctl enable nauticai-watcher
+#
+#   4. Start now:
+#      sudo systemctl start nauticai-watcher
+#
+#   5. Check status:
+#      sudo systemctl status nauticai-watcher
+#
+#   6. View logs:
+#      sudo journalctl -u nauticai-watcher -f
+#
+# To stop:
+#   sudo systemctl stop nauticai-watcher
+#
+# To disable auto-start:
+#   sudo systemctl disable nauticai-watcher
+# ============================================================
+
+[Unit]
+Description=NautiCAI OpenClaw ROV Image Watcher
+Documentation=https://github.com/GautamNauticAi/nauticaiconsole
+After=network.target nauticai-api.service
+Wants=nauticai-api.service
+
+[Service]
+# ── Identity ──────────────────────────────────────────────
+# Change 'jetson' to the actual username on your Jetson
+User=jetson
+Group=jetson
+
+# ── Working directory ─────────────────────────────────────
+# Change this to the actual path of nauticaiconsole on Jetson
+WorkingDirectory=/home/jetson/nauticaiconsole
+
+# ── Command to run ────────────────────────────────────────
+ExecStart=/usr/bin/python3 /home/jetson/nauticaiconsole/openclaw/watcher.py
+
+# ── Restart policy ────────────────────────────────────────
+# Always restart if watcher crashes — never let it stay down
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# ── Environment ───────────────────────────────────────────
+# Load .env file from project root
+EnvironmentFile=/home/jetson/nauticaiconsole/.env
+
+# ── Logging ───────────────────────────────────────────────
+# Logs go to journald — view with: journalctl -u nauticai-watcher -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nauticai-watcher
+
+# ── Timeouts ──────────────────────────────────────────────
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# ── Security hardening ────────────────────────────────────
+# Restrict what the watcher process can access on the system
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/jetson/nauticaiconsole/incoming
+ReadWritePaths=/home/jetson/nauticaiconsole/processed
+ReadWritePaths=/home/jetson/nauticaiconsole/failed
+ReadWritePaths=/home/jetson/nauticaiconsole/openclaw
+
+[Install]
+WantedBy=multi-user.target

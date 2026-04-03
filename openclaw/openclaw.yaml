@@ -1,0 +1,192 @@
+# ============================================================
+# NautiCAI OpenShell Security Policy
+# Component: OpenClaw Watcher
+# Version: 1.1.0
+# Description: Defines the exact permissions and boundaries
+# for the NautiCAI autonomous inspection pipeline.
+# This file is the complete list of what NautiCAI can do
+# on your network. Nothing outside this policy is permitted.
+# ============================================================
+
+policy:
+  name: "NautiCAI-OpenClaw-Policy"
+  version: "1.1.0"
+  description: "Security sandbox for NautiCAI autonomous hull inspection pipeline"
+  enforced: true
+
+# ============================================================
+# IDENTITY — Who is running this agent
+# ============================================================
+agent:
+  name: "NautiCAI-Watcher"
+  description: "Autonomous hull inspection agent triggered by ROV image transfer"
+  runtime: "python3"
+  entry_point: "openclaw/watcher.py"
+
+# ============================================================
+# FILE SYSTEM PERMISSIONS
+# Paths are relative to the nauticaiconsole project root.
+# On Jetson, set PROJECT_ROOT in .env to the absolute path.
+# ============================================================
+filesystem:
+  read:
+    - path: "incoming/"
+      description: "ROV images land here — agent reads new files"
+      recursive: false
+      allowed_extensions:
+        - ".jpg"
+        - ".jpeg"
+        - ".png"
+        - ".webp"
+        - ".bmp"
+        - ".mp4"
+        - ".avi"
+        - ".mov"
+
+    - path: "openclaw/openclaw.yaml"
+      description: "Agent reads its own policy at startup to verify permissions"
+
+    - path: ".env"
+      description: "Agent reads Telegram token and API URL — read only, never written"
+      access: "read_only"
+
+  write:
+    - path: "processed/"
+      description: "Successfully processed images move here with timestamp prefix"
+      recursive: false
+
+    - path: "failed/"
+      description: "Failed images move here for manual retry"
+      recursive: false
+
+    - path: "openclaw/watcher.log"
+      description: "Complete audit log of every image processed"
+
+  deny:
+    - path: "AgenticAI_Backend/"
+      description: "Agent cannot modify backend code"
+
+    - path: "frontend/"
+      description: "Agent cannot modify frontend code"
+
+    - path: ".git/"
+      description: "Agent cannot modify version control"
+
+    - path: "migrations/"
+      description: "Agent cannot modify database migrations"
+
+# ============================================================
+# NETWORK PERMISSIONS
+# ============================================================
+network:
+  allow:
+    - endpoint: "http://localhost:8000/health"
+      method: "GET"
+      description: "Check backend is alive before processing any image"
+
+    - endpoint: "http://localhost:8000/api/inspect"
+      method: "POST"
+      description: "Submit ROV image to YOLO + SAM inspection pipeline"
+
+    - endpoint: "https://api.telegram.org"
+      method: "POST"
+      description: "Send inspection result to superintendent via Telegram"
+
+  deny:
+    - description: "All other outbound network connections are blocked by default"
+
+# ============================================================
+# PROCESS PERMISSIONS
+# ============================================================
+process:
+  allow:
+    - command: "python3"
+      description: "Run Python pipeline components only"
+
+  deny:
+    - command: "sudo"
+      description: "Elevated privileges never permitted"
+
+    - command: "rm -rf"
+      description: "Destructive deletion not permitted"
+
+    - command: "curl"
+      description: "Shell network calls not permitted — use Python requests only"
+
+    - command: "wget"
+      description: "Shell downloads not permitted"
+
+# ============================================================
+# TRIGGER POLICY
+# ============================================================
+trigger:
+  type: "filesystem_watch"
+  watch_path: "incoming/"
+  events:
+    - "created"
+    - "moved"
+  cooldown_seconds: 2
+  max_concurrent_jobs: 1
+  queue_overflow: "wait"
+  description: >
+    Agent wakes only when new files appear in incoming/ folder.
+    One inspection runs at a time. Additional files wait in queue.
+    2 second cooldown ensures file is fully written before processing.
+
+# ============================================================
+# RATE LIMITS
+# ============================================================
+rate_limits:
+  max_files_per_minute: 10
+  max_api_calls_per_minute: 10
+  max_telegram_messages_per_hour: 20
+  description: "Protects Jetson GPU from overload during large ROV data dumps"
+
+# ============================================================
+# LOGGING — Required for ABS audit trail
+# ============================================================
+logging:
+  enabled: true
+  log_file: "openclaw/watcher.log"
+  log_level: "INFO"
+  log_fields:
+    - "timestamp"
+    - "filename"
+    - "vessel_id"
+    - "action"
+    - "pipeline_result"
+    - "imo_rating"
+    - "coverage_percent"
+    - "telegram_sent"
+    - "processing_time_seconds"
+    - "error_message"
+  retention_days: 90
+
+# ============================================================
+# ALERTS — Automatic Telegram alerts
+# ============================================================
+alerts:
+  on_pipeline_failure:
+    enabled: true
+    notify_telegram: true
+    message: "NautiCAI ALERT: Pipeline failed for {filename}. Image moved to failed/ folder."
+
+  on_policy_violation:
+    enabled: true
+    notify_telegram: true
+    message: "NautiCAI ALERT: Policy violation detected. Watcher stopped. Manual review required."
+
+  on_backend_unreachable:
+    enabled: true
+    notify_telegram: true
+    message: "NautiCAI ALERT: Backend unreachable on port 8000. Images queued in incoming/."
+
+  on_watcher_start:
+    enabled: true
+    notify_telegram: true
+    message: "NautiCAI OpenClaw is online. Watching for ROV images. Ready for inspection."
+
+  on_watcher_stop:
+    enabled: true
+    notify_telegram: true
+    message: "NautiCAI OpenClaw has stopped. Manual restart required."
