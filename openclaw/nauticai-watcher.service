@@ -69,7 +69,7 @@ StandardError=journal
 SyslogIdentifier=nauticai-watcher
 
 # ── Timeouts ──────────────────────────────────────────────
-TimeoutStartSec=60
+TimeoutStartSec=180
 TimeoutStopSec=30
 
 # ── Security hardening ────────────────────────────────────

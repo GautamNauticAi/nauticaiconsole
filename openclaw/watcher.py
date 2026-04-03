@@ -12,7 +12,7 @@
 #   → Checks OpenShell policy
 #   → Calls existing pipeline via API
 #   → Moves image to processed/ or failed/
-#   → Sends Telegram notification
+#   → Sends technical alerts if needed
 #   → Logs everything for audit trail
 #
 # Usage:
@@ -79,10 +79,12 @@ LOG_FILE      = PROJECT_ROOT / "openclaw" / "watcher.log"
 POLICY_FILE   = PROJECT_ROOT / "openclaw" / "openclaw.yaml"
 
 # Backend API
-BACKEND_URL   = os.environ.get("BACKEND_URL", "http://localhost:8000")
-INSPECT_URL   = f"{BACKEND_URL}/api/inspect"
-HEALTH_URL    = f"{BACKEND_URL}/health"
-AUTH_TOKEN    = os.environ.get("OPENCLAW_API_TOKEN", "")
+BACKEND_URL        = os.environ.get("BACKEND_URL", "http://localhost:8000")
+INSPECT_SINGLE_URL = f"{BACKEND_URL}/api/inspect"
+INSPECT_BATCH_URL  = f"{BACKEND_URL}/api/inspect/batch"
+HEALTH_URL         = f"{BACKEND_URL}/health"
+AUTH_TOKEN         = os.environ.get("OPENCLAW_API_TOKEN", "")
+USE_BATCH_MODE     = True
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -90,12 +92,25 @@ TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # Watcher settings
 COOLDOWN_SECONDS   = 2      # Wait after file detected before processing
+BATCH_QUIET_SECONDS = 10    # If no new file arrives for this many seconds, close the batch
+BATCH_POLL_SECONDS  = 2     # How often batch worker checks for ready groups
 BACKEND_TIMEOUT    = 120    # Seconds to wait for pipeline response
 HEALTH_CHECK_RETRY = 5      # Retry backend health check this many times
 HEALTH_CHECK_WAIT  = 10     # Seconds between health check retries
 
 # Allowed image extensions
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".mp4", ".avi", ".mov"}
+
+# In-memory batch state
+# Structure:
+# {
+#   vessel_id: {
+#       "files": [Path(...), Path(...)],
+#       "last_seen": <timestamp>
+#   }
+# }
+BATCH_STATE = {}
+BATCH_LOCK = threading.Lock()
 
 # ============================================================
 # LOGGING SETUP
@@ -114,7 +129,7 @@ logging.basicConfig(
 log = logging.getLogger("NautiCAI-OpenClaw")
 
 # ============================================================
-# TELEGRAM NOTIFICATIONS
+# TELEGRAM TECHNICAL ALERTS ONLY
 # ============================================================
 
 def send_telegram(message: str) -> bool:
@@ -176,6 +191,171 @@ def extract_vessel_id(filename: str) -> str:
     return vessel_id[:200]  # Cap length
 
 # ============================================================
+# BATCH QUEUE HELPERS
+# Group files by vessel and wait for quiet period before processing
+# ============================================================
+
+def queue_file_for_batch(path: Path) -> None:
+    """Add a file to the in-memory batch queue for its vessel."""
+    vessel_id = extract_vessel_id(path.name)
+    now = time.time()
+
+    with BATCH_LOCK:
+        state = BATCH_STATE.setdefault(vessel_id, {"files": [], "last_seen": now})
+        if path not in state["files"]:
+            state["files"].append(path)
+        state["last_seen"] = now
+
+    log.info(f"Queued for batch | vessel={vessel_id} | file={path.name}")
+
+# ============================================================
+# BATCH WORKER
+# Flush ready vessel batches after quiet period
+# ============================================================
+
+def get_ready_batches() -> list[tuple[str, list[Path]]]:
+    """Return vessel batches that have been quiet long enough to process."""
+    now = time.time()
+    ready = []
+
+    with BATCH_LOCK:
+        for vessel_id, state in list(BATCH_STATE.items()):
+            files = [p for p in state["files"] if p.exists()]
+            if not files:
+                BATCH_STATE.pop(vessel_id, None)
+                continue
+
+            if now - state["last_seen"] >= BATCH_QUIET_SECONDS:
+                ready.append((vessel_id, files))
+                BATCH_STATE.pop(vessel_id, None)
+
+    return ready
+
+
+def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict]:
+    """
+    Call the existing NautiCAI batch inspection pipeline.
+    Returns result dict on success, None on failure.
+    """
+    log.info(f"Triggering batch pipeline | vessel={vessel_id} | files={len(image_paths)}")
+    start_time = time.time()
+
+    try:
+        headers = {}
+        if AUTH_TOKEN:
+            headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+
+        opened_files = []
+        try:
+            for image_path in image_paths:
+                f = open(image_path, "rb")
+                opened_files.append(("images", (image_path.name, f, "image/jpeg")))
+
+            data = {"vessel_id": vessel_id}
+            response = requests.post(
+                INSPECT_BATCH_URL,
+                files=opened_files,
+                data=data,
+                headers=headers,
+                timeout=BACKEND_TIMEOUT
+            )
+        finally:
+            for _, (_, f, _) in opened_files:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
+        elapsed = round(time.time() - start_time, 2)
+
+        if response.status_code == 200:
+            result = response.json()
+            log.info(f"Batch pipeline complete in {elapsed}s | vessel={vessel_id} | files={len(image_paths)}")
+            return {"result": result, "elapsed": elapsed}
+
+        log.error(f"Batch pipeline failed: HTTP {response.status_code} | {response.text}")
+        return None
+
+    except Exception as e:
+        log.error(f"Batch pipeline exception for vessel {vessel_id}: {e}")
+        return None
+
+
+def move_batch_to_processed(image_paths: list[Path]) -> None:
+    """Move a successful batch to processed/."""
+    for image_path in image_paths:
+        if image_path.exists():
+            move_to_processed(image_path)
+
+
+def move_batch_to_failed(image_paths: list[Path]) -> None:
+    """Move a failed batch to failed/."""
+    for image_path in image_paths:
+        if image_path.exists():
+            move_to_failed(image_path)
+
+
+def move_to_processed(image_path: Path) -> None:
+    """Move successfully processed image to processed/ folder."""
+    PROCESSED_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = PROCESSED_DIR / f"{timestamp}_{image_path.name}"
+    shutil.move(str(image_path), str(dest))
+    log.info(f"Moved to processed/: {dest.name}")
+
+
+def move_to_failed(image_path: Path) -> None:
+    """Move failed image to failed/ folder for manual retry."""
+    FAILED_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = FAILED_DIR / f"{timestamp}_{image_path.name}"
+    shutil.move(str(image_path), str(dest))
+    log.info(f"Moved to failed/: {dest.name}")
+
+
+def process_batch(vessel_id: str, image_paths: list[Path]) -> None:
+    """Process a completed batch for one vessel."""
+    start = time.time()
+    filenames = [p.name for p in image_paths]
+
+    log.info(f"Processing batch | vessel={vessel_id} | files={filenames}")
+
+    result = run_pipeline_batch(image_paths, vessel_id)
+    elapsed = round(time.time() - start, 2)
+
+    if result:
+        move_batch_to_processed(image_paths)
+        notify_result(vessel_id, result, elapsed)
+        for p in image_paths:
+            write_audit_log(p.name, vessel_id, "processed", result, elapsed)
+    else:
+        move_batch_to_failed(image_paths)
+        send_telegram(
+            f"NautiCAI ALERT: Batch pipeline failed for vessel <b>{vessel_id}</b>.\n"
+            f"Files moved to failed/ folder."
+        )
+        for p in image_paths:
+            write_audit_log(p.name, vessel_id, "failed", None, elapsed, "Batch pipeline returned no result")
+
+
+def start_batch_worker() -> None:
+    """Background worker that flushes quiet vessel batches."""
+    def _worker():
+        while True:
+            try:
+                ready = get_ready_batches()
+                for vessel_id, image_paths in ready:
+                    t = threading.Thread(target=process_batch, args=(vessel_id, image_paths), daemon=True)
+                    t.start()
+            except Exception as e:
+                log.error(f"Batch worker error: {e}")
+            time.sleep(BATCH_POLL_SECONDS)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    log.info("Batch worker started")
+
+# ============================================================
 # POLICY CHECK
 # Read OpenShell YAML and verify watcher is within bounds
 # ============================================================
@@ -229,191 +409,6 @@ def wait_for_backend() -> bool:
 # Send image to existing /api/inspect endpoint
 # ============================================================
 
-def run_pipeline(image_path: Path, vessel_id: str) -> Optional[dict]:
-    """
-    Call the existing NautiCAI inspection pipeline.
-    Returns result dict on success, None on failure.
-    """
-    log.info(f"Triggering pipeline for {image_path.name} — vessel: {vessel_id}")
-    start_time = time.time()
-
-    try:
-        headers = {}
-        if AUTH_TOKEN:
-            headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
-
-        with open(image_path, "rb") as f:
-            files  = {"image": (image_path.name, f, "image/jpeg")}
-            data   = {"vessel_id": vessel_id}
-            response = requests.post(
-                INSPECT_URL,
-                files=files,
-                data=data,
-                headers=headers,
-                timeout=BACKEND_TIMEOUT
-            )
-
-        elapsed = round(time.time() - start_time, 2)
-
-        if response.status_code == 200:
-            result = response.json()
-            log.info(f"Pipeline complete in {elapsed}s — vessel: {vessel_id}")
-            return {"result": result, "elapsed": elapsed}
-        else:
-            log.error(f"Pipeline failed: HTTP {response.status_code} — {response.text[:200]}")
-            return None
-
-    except requests.Timeout:
-        log.error(f"Pipeline timed out after {BACKEND_TIMEOUT}s for {image_path.name}")
-        return None
-    except Exception as e:
-        log.error(f"Pipeline error for {image_path.name}: {e}")
-        return None
-
-# ============================================================
-# FILE MANAGEMENT
-# Move image to processed/ or failed/ after pipeline
-# ============================================================
-
-def move_to_processed(image_path: Path) -> None:
-    """Move successfully processed image to processed/ folder."""
-    PROCESSED_DIR.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = PROCESSED_DIR / f"{timestamp}_{image_path.name}"
-    shutil.move(str(image_path), str(dest))
-    log.info(f"Moved to processed/: {dest.name}")
-
-def move_to_failed(image_path: Path) -> None:
-    """Move failed image to failed/ folder for manual retry."""
-    FAILED_DIR.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = FAILED_DIR / f"{timestamp}_{image_path.name}"
-    shutil.move(str(image_path), str(dest))
-    log.info(f"Moved to failed/: {dest.name}")
-
-# ============================================================
-# RESULT NOTIFICATION
-# Send Telegram with inspection result
-# ============================================================
-
-def notify_result(vessel_id: str, result: dict, elapsed: float) -> None:
-    """Send Telegram notification with inspection result."""
-    try:
-        reports = result.get("result", {}).get("reports", [])
-        if not reports:
-            send_telegram(f"NautiCAI: Inspection complete for <b>{vessel_id}</b> but no report data returned.")
-            return
-
-        report   = reports[0]
-        metrics  = report.get("ai_vision_metrics", {})
-        comp     = report.get("compliance_result", {})
-
-        coverage         = metrics.get("total_hull_coverage_percentage", 0)
-        severity         = metrics.get("severity", "Unknown")
-        imo_rating       = comp.get("official_imo_rating", "Unknown")
-        action           = comp.get("recommended_action", "")
-        requires_cleaning = comp.get("requires_cleaning", False)
-
-        status_icon = "🚨" if requires_cleaning else "✅"
-
-        message = (
-            f"{status_icon} <b>NautiCAI Inspection Complete</b>\n\n"
-            f"🚢 <b>Vessel:</b> {vessel_id}\n"
-            f"📊 <b>Coverage:</b> {coverage}%\n"
-            f"⚠️ <b>Severity:</b> {severity}\n"
-            f"🏛 <b>IMO Rating:</b> {imo_rating}\n"
-            f"📋 <b>Action:</b> {action}\n"
-            f"⏱ <b>Processed in:</b> {elapsed}s\n\n"
-            f"📄 PDF report available on dashboard."
-        )
-
-        send_telegram(message)
-
-    except Exception as e:
-        log.error(f"Notify result error: {e}")
-        send_telegram(f"NautiCAI: Inspection complete for <b>{vessel_id}</b>. Check dashboard for results.")
-
-# ============================================================
-# AUDIT LOG
-# Write structured log entry for every processed image
-# ============================================================
-
-def write_audit_log(
-    filename: str,
-    vessel_id: str,
-    action: str,
-    result: Optional[dict],
-    elapsed: float,
-    error: str = ""
-) -> None:
-    """Write structured audit log entry."""
-    try:
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "filename": filename,
-            "vessel_id": vessel_id,
-            "action": action,
-            "pipeline_result": "success" if result else "failed",
-            "elapsed_seconds": elapsed,
-            "error_message": error
-        }
-        if result:
-            reports = result.get("result", {}).get("reports", [])
-            if reports:
-                comp = reports[0].get("compliance_result", {})
-                metrics = reports[0].get("ai_vision_metrics", {})
-                entry["imo_rating"]       = comp.get("official_imo_rating", "")
-                entry["coverage_percent"] = metrics.get("total_hull_coverage_percentage", 0)
-                entry["requires_cleaning"] = comp.get("requires_cleaning", False)
-
-        log.info(f"AUDIT | {json.dumps(entry)}")
-    except Exception as e:
-        log.error(f"Audit log error: {e}")
-
-# ============================================================
-# PROCESS ONE IMAGE
-# Complete flow for a single image file
-# ============================================================
-
-def process_image(image_path: Path) -> None:
-    """Full processing flow for one image."""
-    filename  = image_path.name
-    vessel_id = extract_vessel_id(filename)
-    start     = time.time()
-
-    log.info(f"New image detected: {filename} — vessel: {vessel_id}")
-
-    # Wait for file to be fully written
-    time.sleep(COOLDOWN_SECONDS)
-
-    # Confirm file still exists after cooldown
-    if not image_path.exists():
-        log.warning(f"File disappeared after cooldown: {filename}")
-        return
-
-    # Confirm extension is allowed
-    if image_path.suffix.lower() not in ALLOWED_EXTENSIONS:
-        log.warning(f"Skipping unsupported file type: {filename}")
-        return
-
-    # Run pipeline
-    result = run_pipeline(image_path, vessel_id)
-    elapsed = round(time.time() - start, 2)
-
-    if result:
-        # Success
-        move_to_processed(image_path)
-        notify_result(vessel_id, result, elapsed)
-        write_audit_log(filename, vessel_id, "processed", result, elapsed)
-    else:
-        # Failure
-        move_to_failed(image_path)
-        send_telegram(
-            f"NautiCAI ALERT: Pipeline failed for <b>{filename}</b>.\n"
-            f"Vessel: {vessel_id}\n"
-            f"Image moved to failed/ folder."
-        )
-        write_audit_log(filename, vessel_id, "failed", None, elapsed, "Pipeline returned no result")
 
 # ============================================================
 # FOLDER WATCHER
@@ -453,13 +448,13 @@ def start_watcher() -> None:
                     if str(path) in self._processing:
                         return
                     self._processing.add(str(path))
-                # Process in background thread so watcher stays responsive
+                # Queue file for grouped batch processing
                 t = threading.Thread(target=self._process, args=(path,), daemon=True)
                 t.start()
 
             def _process(self, path: Path):
                 try:
-                    process_image(path)
+                    queue_file_for_batch(path)
                 finally:
                     with self._lock:
                         self._processing.discard(str(path))
@@ -506,7 +501,7 @@ def start_polling_watcher() -> None:
                 if f.is_file() and str(f) not in seen:
                     if f.suffix.lower() in ALLOWED_EXTENSIONS:
                         seen.add(str(f))
-                        t = threading.Thread(target=process_image, args=(f,), daemon=True)
+                        t = threading.Thread(target=queue_file_for_batch, args=(f,), daemon=True)
                         t.start()
             time.sleep(3)
     except KeyboardInterrupt:
@@ -543,7 +538,10 @@ def main():
     if not wait_for_backend():
         log.warning("Backend not ready — watcher will start anyway and retry on each image")
 
-    # Step 4 — Start watching
+    # Step 4 — Start batch worker
+    start_batch_worker()
+
+    # Step 5 — Start watching
     log.info("Starting OpenClaw folder watcher...")
     start_watcher()
 

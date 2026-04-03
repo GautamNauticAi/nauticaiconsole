@@ -84,9 +84,9 @@ network:
       method: "GET"
       description: "Check backend is alive before processing any image"
 
-    - endpoint: "http://localhost:8000/api/inspect"
+    - endpoint: "http://localhost:8000/api/inspect/batch"
       method: "POST"
-      description: "Submit ROV image to YOLO + SAM inspection pipeline"
+      description: "Submit grouped ROV images as one batch to the inspection pipeline"
 
     - endpoint: "https://api.telegram.org"
       method: "POST"
@@ -126,18 +126,20 @@ trigger:
     - "created"
     - "moved"
   cooldown_seconds: 2
+  quiet_period_seconds: 10
   max_concurrent_jobs: 1
   queue_overflow: "wait"
   description: >
-    Agent wakes only when new files appear in incoming/ folder.
-    One inspection runs at a time. Additional files wait in queue.
-    2 second cooldown ensures file is fully written before processing.
+    Agent wakes when new files appear in incoming/ folder.
+    Files are grouped automatically by vessel ID from filename.
+    A short quiet period is used so all related ROV images arrive before processing.
+    The grouped files are then submitted as one inspection batch.
 
 # ============================================================
 # RATE LIMITS
 # ============================================================
 rate_limits:
-  max_files_per_minute: 10
+  max_files_per_minute: 300
   max_api_calls_per_minute: 10
   max_telegram_messages_per_hour: 20
   description: "Protects Jetson GPU from overload during large ROV data dumps"
@@ -157,7 +159,7 @@ logging:
     - "pipeline_result"
     - "imo_rating"
     - "coverage_percent"
-    - "telegram_sent"
+    - "batch_size"
     - "processing_time_seconds"
     - "error_message"
   retention_days: 90
