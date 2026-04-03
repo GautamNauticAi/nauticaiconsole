@@ -99,7 +99,16 @@ def _load_all_dotenv() -> None:
 
 _load_all_dotenv()
 
-from fpdf import FPDF
+try:
+    from fpdf import FPDF
+except ImportError as _e:
+    raise ImportError(
+        "Package 'fpdf' is required for PDF reports. Install with:\n"
+        "  pip install fpdf==1.7.2\n"
+        "Or on Jetson (full API deps, without changing torch):\n"
+        "  bash scripts/jetson_reinstall_python_deps.sh\n"
+        "Activate your venv first if you use one."
+    ) from _e
 import uvicorn
 try:
     import jwt as pyjwt

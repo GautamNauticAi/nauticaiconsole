@@ -27,3 +27,4 @@ python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is
 
 echo "==> Done. Start API: python nauticai_api.py"
 echo "    Optional: cp .env.jetson.example .env  # Jetson-tuned NAUTICAI_* defaults + comments"
+echo "    If you only need to fix missing fpdf/fastapi (torch already OK): bash scripts/jetson_reinstall_python_deps.sh"
