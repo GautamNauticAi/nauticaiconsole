@@ -1,0 +1,60 @@
+{
+    "image": "6b969918b46d42e88c8461bb1b143dd4.jpg",
+    "image_path": "temp_uploads\\6b969918b46d42e88c8461bb1b143dd4.jpg",
+    "image_width": 312,
+    "image_height": 312,
+    "image_area_pixels": 97344,
+    "num_detections": 2,
+    "total_fouling_pixels": 31987,
+    "coverage_percent": 32.8598,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\6b969918b46d42e88c8461bb1b143dd4_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\6b969918b46d42e88c8461bb1b143dd4_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\6b969918b46d42e88c8461bb1b143dd4_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.8415,
+            "bbox_xyxy": [
+                0,
+                0,
+                195,
+                167
+            ],
+            "bbox_area_pixels": 32565,
+            "mask_pixels": 22279,
+            "coverage_percent_of_image": 22.8869,
+            "mask_path": "pipeline_outputs\\masks\\6b969918b46d42e88c8461bb1b143dd4_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\6b969918b46d42e88c8461bb1b143dd4_crop_0.png",
+            "crop_box_xyxy": [
+                0,
+                0,
+                169,
+                143
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.7595,
+            "bbox_xyxy": [
+                187,
+                0,
+                311,
+                121
+            ],
+            "bbox_area_pixels": 15004,
+            "mask_pixels": 9708,
+            "coverage_percent_of_image": 9.9729,
+            "mask_path": "pipeline_outputs\\masks\\6b969918b46d42e88c8461bb1b143dd4_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\6b969918b46d42e88c8461bb1b143dd4_crop_1.png",
+            "crop_box_xyxy": [
+                207,
+                0,
+                311,
+                95
+            ]
+        }
+    ]
+}

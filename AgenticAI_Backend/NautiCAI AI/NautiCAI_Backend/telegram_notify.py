@@ -4,6 +4,7 @@
 import os
 import urllib.request
 import json
+from typing import Any, Dict, List
 
 def _send_message(token: str, chat_id: str, text: str) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -30,7 +31,15 @@ def _send_document(token: str, chat_id: str, file_path: str, caption: str = "") 
         except Exception:
             return False
 
-def send_inspection_result(vessel_id: str, report_payload: dict, pdf_path: str = None):
+def _normalize_payloads(report_payload_or_payloads: Any) -> List[Dict[str, Any]]:
+    if isinstance(report_payload_or_payloads, list):
+        return [p for p in report_payload_or_payloads if isinstance(p, dict)]
+    if isinstance(report_payload_or_payloads, dict):
+        return [report_payload_or_payloads]
+    return []
+
+
+def send_inspection_result(vessel_id: str, report_payload: Any, pdf_path: str = None):
     """
     Notify Telegram (Charan) when an inspection completes.
     Call this from the API after POST /api/inspect succeeds.
@@ -41,27 +50,62 @@ def send_inspection_result(vessel_id: str, report_payload: dict, pdf_path: str =
     if not token or not chat_id:
         return
 
-    meta = report_payload.get("metadata", {})
-    metrics = report_payload.get("ai_vision_metrics", {})
-    compliance = report_payload.get("compliance_result", {})
-    coverage = metrics.get("total_hull_coverage_percentage", 0)
-    severity = metrics.get("severity", "")
-    rating = compliance.get("official_imo_rating", "")
-    action = compliance.get("recommended_action", "")
-    requires = compliance.get("requires_cleaning", False)
-    ts = meta.get("inspection_timestamp", "")
+    payloads = _normalize_payloads(report_payload)
+    if not payloads:
+        return
 
-    status = "🔴 CRITICAL – immediate action" if requires else "🟢 ACCEPTABLE"
+    metrics_list = [p.get("ai_vision_metrics", {}) for p in payloads]
+    compliance_list = [p.get("compliance_result", {}) for p in payloads]
+    meta_last = payloads[-1].get("metadata", {})
+    n = len(payloads)
+
+    coverages = [
+        float(m.get("total_hull_coverage_percentage", 0) or 0)
+        for m in metrics_list
+    ]
+    detections = [
+        int(m.get("total_detections", 0) or 0)
+        for m in metrics_list
+    ]
+    needs_cleaning = [bool(c.get("requires_cleaning", False)) for c in compliance_list]
+    avg_coverage = round(sum(coverages) / max(1, len(coverages)), 2)
+    total_detections = sum(detections)
+    any_critical = any(needs_cleaning)
+    status = "🔴 CRITICAL – immediate action" if any_critical else "🟢 ACCEPTABLE"
+
+    # Prefer the highest FR value as the batch headline.
+    ratings = [str(c.get("official_imo_rating", "") or "") for c in compliance_list]
+    def _rating_key(r: str) -> int:
+        try:
+            if r.upper().startswith("FR-"):
+                return int(r.split("-", 1)[1].split()[0])
+        except Exception:
+            pass
+        return -1
+    headline_rating = ""
+    if ratings:
+        headline_rating = max(ratings, key=_rating_key)
+    headline_action = ""
+    for c in compliance_list:
+        action = str(c.get("recommended_action", "") or "").strip()
+        if action:
+            headline_action = action
+            if bool(c.get("requires_cleaning", False)):
+                break
+    ts = meta_last.get("inspection_timestamp", "")
+
     text = (
-        f"<b>NautiCAI – inspection complete</b>\n\n"
+        f"<b>NautiCAI – batch inspection complete</b>\n\n"
         f"<b>Vessel:</b> {vessel_id}\n"
         f"<b>Time:</b> {ts}\n"
-        f"<b>Hull coverage:</b> {coverage}%\n"
-        f"<b>Condition:</b> {severity}\n"
-        f"<b>IMO rating:</b> {rating}\n"
+        f"<b>Images processed:</b> {n}\n"
+        f"<b>Avg hull coverage:</b> {avg_coverage}%\n"
+        f"<b>Total detections:</b> {total_detections}\n"
+        f"<b>Batch IMO headline:</b> {headline_rating}\n"
         f"<b>Status:</b> {status}\n"
-        f"<b>Action:</b> {action}\n"
+        f"<b>Action:</b> {headline_action}\n"
     )
     _send_message(token, chat_id, text)
     if pdf_path and os.path.isfile(pdf_path):
-        _send_document(token, chat_id, pdf_path, caption=f"NautiCAI report: {vessel_id}")
+        suffix = f" ({n} image{'s' if n != 1 else ''})"
+        _send_document(token, chat_id, pdf_path, caption=f"NautiCAI report: {vessel_id}{suffix}")

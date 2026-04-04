@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "dataset3_biofouling_frame0-05-24-50_jpgrfde7c6938072f10e1f10c9dd284db32d3",
+        "inspection_timestamp": "2026-04-04 17:59:01",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 98.8875,
+        "severity": "High",
+        "total_detections": 1
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-4 (Heavy Macrofouling - Critical!)",
+        "recommended_action": "URGENT: Immediate dry-dock cleaning required!",
+        "requires_cleaning": true
+    }
+}

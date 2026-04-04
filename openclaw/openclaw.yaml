@@ -31,7 +31,7 @@ agent:
 filesystem:
   read:
     - path: "incoming/"
-      description: "ROV images land here — agent reads new files"
+      description: "ROV images land here — agent reads new files (or set OPENCLAW_INCOMING_DIR in .env)"
       recursive: false
       allowed_extensions:
         - ".jpg"

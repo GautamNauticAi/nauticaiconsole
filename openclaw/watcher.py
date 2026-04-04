@@ -16,7 +16,12 @@
 #   → Logs everything for audit trail
 #
 # Usage:
+#   cd <NautiCAI repo root>   # directory that contains openclaw/ and incoming/
+#   pip install -r openclaw/requirements.txt
 #   python3 openclaw/watcher.py
+#
+# Env (see ../.env.example):
+#   BACKEND_URL, OPENCLAW_API_TOKEN, OPENCLAW_INCOMING_DIR, OPENCLAW_PROCESSED_DIR, OPENCLAW_FAILED_DIR
 #
 # Auto-start on Jetson boot:
 #   sudo systemctl enable nauticai-watcher
@@ -30,6 +35,7 @@ import sys
 import time
 import json
 import shutil
+import re
 import logging
 import requests
 import threading
@@ -45,45 +51,94 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Load .env file
-def _load_env():
-    env_path = PROJECT_ROOT / ".env"
-    if not env_path.is_file():
+# Load .env file (PROJECT_ROOT/.env — same folder as openclaw/)
+_BACKEND_ENV = (
+    PROJECT_ROOT
+    / "AgenticAI_Backend"
+    / "NautiCAI AI"
+    / "NautiCAI_Backend"
+    / ".env"
+)
+
+
+def _merge_telegram_from_backend_env() -> None:
+    """Fill TELEGRAM_* from backend .env when unset (token often lives there, not NautiCAI/.env)."""
+    if not _BACKEND_ENV.is_file():
         return
     try:
-        from dotenv import load_dotenv
-        load_dotenv(env_path, override=True)
+        from dotenv import dotenv_values
     except ImportError:
-        # Manual fallback if python-dotenv not installed
-        for line in env_path.read_text().splitlines():
-            s = line.strip()
-            if not s or s.startswith("#") or "=" not in s:
-                continue
-            key, _, val = s.partition("=")
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key and val:
-                os.environ[key] = val
+        return
+    for key, val in dotenv_values(_BACKEND_ENV).items():
+        if not key.startswith("TELEGRAM_"):
+            continue
+        if val is None or not str(val).strip():
+            continue
+        if (os.environ.get(key) or "").strip():
+            continue
+        os.environ[key] = str(val).strip()
+
+
+def _load_env():
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.is_file():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(env_path, override=True, encoding="utf-8-sig")
+        except ImportError:
+            # Manual fallback if python-dotenv not installed
+            for line in env_path.read_text(encoding="utf-8-sig").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                key, _, val = s.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and val:
+                    os.environ[key] = val
+    _merge_telegram_from_backend_env()
+
 
 _load_env()
+
+
+def _path_from_env(key: str, default: Path) -> Path:
+    """Absolute path from env, or default. Expands ~ and resolves."""
+    raw = (os.environ.get(key) or "").strip().strip('"').strip("'")
+    if not raw:
+        return default
+    # WSL/Linux: treat C:\... or C:/... as /mnt/c/...
+    if sys.platform != "win32" and len(raw) >= 2 and raw[1] == ":":
+        drive = raw[0].lower()
+        rest = raw[2:].lstrip("/\\").replace("\\", "/")
+        p = Path(f"/mnt/{drive}") / rest
+        return p.expanduser().resolve()
+    return Path(raw).expanduser().resolve()
+
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-# Folders
-INCOMING_DIR  = PROJECT_ROOT / "incoming"
-PROCESSED_DIR = PROJECT_ROOT / "processed"
-FAILED_DIR    = PROJECT_ROOT / "failed"
-LOG_FILE      = PROJECT_ROOT / "openclaw" / "watcher.log"
-POLICY_FILE   = PROJECT_ROOT / "openclaw" / "openclaw.yaml"
+# Folders (override with OPENCLAW_* — e.g. watch ~/Downloads/check)
+INCOMING_DIR = _path_from_env("OPENCLAW_INCOMING_DIR", PROJECT_ROOT / "incoming")
+PROCESSED_DIR = _path_from_env("OPENCLAW_PROCESSED_DIR", PROJECT_ROOT / "processed")
+FAILED_DIR = _path_from_env("OPENCLAW_FAILED_DIR", PROJECT_ROOT / "failed")
+LOG_FILE = PROJECT_ROOT / "openclaw" / "watcher.log"
+POLICY_FILE = PROJECT_ROOT / "openclaw" / "openclaw.yaml"
 
 # Backend API
-BACKEND_URL        = os.environ.get("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = (os.environ.get("BACKEND_URL") or "http://localhost:8000").rstrip("/")
 INSPECT_SINGLE_URL = f"{BACKEND_URL}/api/inspect"
-INSPECT_BATCH_URL  = f"{BACKEND_URL}/api/inspect/batch"
-HEALTH_URL         = f"{BACKEND_URL}/health"
-AUTH_TOKEN         = os.environ.get("OPENCLAW_API_TOKEN", "")
+INSPECT_BATCH_URL = f"{BACKEND_URL}/api/inspect/batch"
+_health = (os.environ.get("OPENCLAW_HEALTH_URL") or "").strip()
+if _health.startswith("http"):
+    HEALTH_URL = _health.rstrip("/")
+elif _health:
+    HEALTH_URL = f"{BACKEND_URL}/{_health.lstrip('/')}"
+else:
+    HEALTH_URL = f"{BACKEND_URL}/health"
+AUTH_TOKEN = os.environ.get("OPENCLAW_API_TOKEN", "")
 USE_BATCH_MODE     = True
 
 # Telegram
@@ -95,6 +150,10 @@ COOLDOWN_SECONDS   = 2      # Wait after file detected before processing
 BATCH_QUIET_SECONDS = 10    # If no new file arrives for this many seconds, close the batch
 BATCH_POLL_SECONDS  = 2     # How often batch worker checks for ready groups
 BACKEND_TIMEOUT    = 120    # Seconds to wait for pipeline response
+BACKEND_TIMEOUT_PER_IMAGE = 15  # Extra seconds per image for large batches
+BACKEND_TIMEOUT_MAX = 1800  # Hard cap for one request timeout (30 min)
+TIMEOUT_GRACE_SECONDS = 180  # After read-timeout, poll backend to confirm completion
+TIMEOUT_GRACE_POLL_SECONDS = 6
 HEALTH_CHECK_RETRY = 5      # Retry backend health check this many times
 HEALTH_CHECK_WAIT  = 10     # Seconds between health check retries
 
@@ -135,7 +194,10 @@ log = logging.getLogger("NautiCAI-OpenClaw")
 def send_telegram(message: str) -> bool:
     """Send a Telegram message to the superintendent."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        log.warning("Telegram not configured — skipping notification")
+        log.debug(
+            "Telegram skip: need TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID "
+            "(backend .env is merged automatically; chat_id is your numeric Telegram user id)."
+        )
         return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -168,12 +230,26 @@ def extract_vessel_id(filename: str) -> str:
     Strips date (8 digits) and sequence number from end.
     Falls back to full stem if pattern not found.
     """
+    forced = (os.environ.get("OPENCLAW_FORCE_VESSEL_ID") or "").strip()
+    if forced:
+        return forced[:200]
+
     stem = Path(filename).stem  # e.g. MV_PACIFIC_TRADER_20260403_001
-    parts = stem.split("_")
+    # Common dataset/export suffix (e.g. ".rf.<hash>") should not split batches.
+    stem = re.sub(r"\.rf\.[0-9a-fA-F]+$", "", stem)
+    stem = stem.replace(" ", "_")
+    parts = [p for p in stem.split("_") if p]
 
     # Walk backwards and strip date and sequence parts
     clean_parts = []
     for part in reversed(parts):
+        lower = part.lower().strip()
+        # Skip extension-like markers embedded in names (e.g. *_jpg or *_png)
+        if lower in {"jpg", "jpeg", "png", "webp", "bmp"}:
+            continue
+        # Skip frame tokens in dataset-style names (frame0-14-41-50, frame1n-29-, ...)
+        if lower.startswith("frame"):
+            continue
         # Skip 8-digit dates like 20260403
         if part.isdigit() and len(part) == 8:
             continue
@@ -186,7 +262,7 @@ def extract_vessel_id(filename: str) -> str:
 
     # Fallback to full stem if result is empty
     if not vessel_id:
-        vessel_id = stem
+        vessel_id = stem or "inspection_batch"
 
     return vessel_id[:200]  # Cap length
 
@@ -244,6 +320,18 @@ def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict
         headers = {}
         if AUTH_TOKEN:
             headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+        expected_count = len(image_paths)
+        timeout_seconds = min(
+            BACKEND_TIMEOUT_MAX,
+            max(BACKEND_TIMEOUT, 30 + (expected_count * BACKEND_TIMEOUT_PER_IMAGE)),
+        )
+        baseline_count = _get_report_count(vessel_id, headers)
+        log.info(
+            "Batch request timeout set to %ss | vessel=%s | files=%s",
+            timeout_seconds,
+            vessel_id,
+            expected_count,
+        )
 
         opened_files = []
         try:
@@ -257,7 +345,7 @@ def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict
                 files=opened_files,
                 data=data,
                 headers=headers,
-                timeout=BACKEND_TIMEOUT
+                timeout=timeout_seconds
             )
         finally:
             for _, (_, f, _) in opened_files:
@@ -276,9 +364,72 @@ def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict
         log.error(f"Batch pipeline failed: HTTP {response.status_code} | {response.text}")
         return None
 
+    except requests.exceptions.ReadTimeout:
+        elapsed = round(time.time() - start_time, 2)
+        log.warning(
+            "Batch request timed out after %ss | vessel=%s | files=%s. "
+            "Checking backend for late completion...",
+            timeout_seconds,
+            vessel_id,
+            len(image_paths),
+        )
+        if _wait_for_report_growth(vessel_id, headers, baseline_count, len(image_paths)):
+            log.info(
+                "Backend completed batch after timeout | vessel=%s | files=%s | elapsed=%ss",
+                vessel_id,
+                len(image_paths),
+                elapsed,
+            )
+            return {"result": {"timeout_recovered": True}, "elapsed": elapsed}
+        log.error(
+            "Batch timed out and no completion observed | vessel=%s | files=%s",
+            vessel_id,
+            len(image_paths),
+        )
+        return None
     except Exception as e:
         log.error(f"Batch pipeline exception for vessel {vessel_id}: {e}")
         return None
+
+
+def _get_report_count(vessel_id: str, headers: dict) -> Optional[int]:
+    """Best-effort count of reports currently saved for vessel."""
+    url = f"{BACKEND_URL}/api/vessel/{vessel_id}/reports"
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        reports = data.get("reports")
+        if isinstance(reports, list):
+            return len(reports)
+    except Exception:
+        return None
+    return None
+
+
+def _wait_for_report_growth(
+    vessel_id: str,
+    headers: dict,
+    baseline_count: Optional[int],
+    expected_new: int,
+) -> bool:
+    """
+    After client-side timeout, poll backend for a short window.
+    If report count increases by expected_new (or reaches expected_new when baseline unknown),
+    treat the batch as successful to avoid false move-to-failed.
+    """
+    deadline = time.time() + TIMEOUT_GRACE_SECONDS
+    while time.time() < deadline:
+        current = _get_report_count(vessel_id, headers)
+        if current is not None:
+            if baseline_count is not None:
+                if current >= (baseline_count + expected_new):
+                    return True
+            elif current >= expected_new:
+                return True
+        time.sleep(TIMEOUT_GRACE_POLL_SECONDS)
+    return False
 
 
 def move_batch_to_processed(image_paths: list[Path]) -> None:
@@ -311,6 +462,52 @@ def move_to_failed(image_path: Path) -> None:
     dest = FAILED_DIR / f"{timestamp}_{image_path.name}"
     shutil.move(str(image_path), str(dest))
     log.info(f"Moved to failed/: {dest.name}")
+
+
+AUDIT_LOG = PROJECT_ROOT / "openclaw" / "audit.jsonl"
+
+
+def write_audit_log(
+    filename: str,
+    vessel_id: str,
+    status: str,
+    pipeline_result: Optional[dict],
+    elapsed: float,
+    error: Optional[str] = None,
+) -> None:
+    """Append one JSON line per file for compliance / debugging."""
+    record = {
+        "ts": datetime.now().isoformat(),
+        "filename": filename,
+        "vessel_id": vessel_id,
+        "status": status,
+        "elapsed_s": elapsed,
+        "error": error,
+        "pipeline": pipeline_result,
+    }
+    try:
+        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str) + "\n")
+    except OSError as e:
+        log.warning(f"Audit log write failed: {e}")
+
+
+def notify_result(vessel_id: str, result: dict, elapsed: float) -> None:
+    """Telegram summary after a successful batch pipeline (result from run_pipeline_batch)."""
+    inner = result.get("result") if isinstance(result, dict) else None
+    lines = [
+        "NautiCAI OpenClaw: batch inspection <b>complete</b>",
+        f"Vessel: <b>{vessel_id}</b>",
+        f"Elapsed: {elapsed}s",
+    ]
+    if isinstance(inner, dict):
+        for key in ("job_id", "inspection_id", "id", "status", "message"):
+            val = inner.get(key)
+            if val is not None:
+                lines.append(f"{key}: {val}")
+    log.info(f"Batch pipeline success | vessel={vessel_id} | {elapsed}s")
+    send_telegram("\n".join(lines))
 
 
 def process_batch(vessel_id: str, image_paths: list[Path]) -> None:
@@ -515,11 +712,36 @@ def start_polling_watcher() -> None:
 def main():
     log.info("=" * 60)
     log.info("NautiCAI OpenClaw Watcher Starting")
+    env_file = PROJECT_ROOT / ".env"
     log.info(f"Project root : {PROJECT_ROOT}")
+    log.info(f"Env file     : {env_file} ({'found' if env_file.is_file() else 'missing'})")
     log.info(f"Incoming     : {INCOMING_DIR}")
+    if not (os.environ.get("OPENCLAW_INCOMING_DIR") or "").strip():
+        log.warning(
+            "OPENCLAW_INCOMING_DIR is not set — using repo incoming/ folder. "
+            f"To watch another folder (e.g. Downloads), add OPENCLAW_INCOMING_DIR to {env_file}"
+        )
+    if not AUTH_TOKEN:
+        log.warning(
+            "OPENCLAW_API_TOKEN is empty — /api/inspect/batch will return 401. "
+            "Set JWT in .env (browser localStorage nauticai:token after login)."
+        )
     log.info(f"Processed    : {PROCESSED_DIR}")
     log.info(f"Failed       : {FAILED_DIR}")
     log.info(f"Backend      : {BACKEND_URL}")
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        log.info("Telegram alerts: enabled (startup/stop and pipeline notices)")
+    else:
+        missing = []
+        if not (TELEGRAM_BOT_TOKEN or "").strip():
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not (TELEGRAM_CHAT_ID or "").strip():
+            missing.append("TELEGRAM_CHAT_ID")
+        log.info(
+            "Telegram alerts: off — set %s in NautiCAI/.env or %s (bot process is separate; watcher needs chat_id too)",
+            " + ".join(missing),
+            _BACKEND_ENV,
+        )
     log.info("=" * 60)
 
     # Step 1 — Check OpenShell policy

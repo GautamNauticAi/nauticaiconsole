@@ -1,0 +1,60 @@
+{
+    "image": "dc165652ec7f4968aa86103ad010525b.jpg",
+    "image_path": "temp_uploads\\dc165652ec7f4968aa86103ad010525b.jpg",
+    "image_width": 312,
+    "image_height": 312,
+    "image_area_pixels": 97344,
+    "num_detections": 2,
+    "total_fouling_pixels": 31091,
+    "coverage_percent": 31.9393,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\dc165652ec7f4968aa86103ad010525b_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\dc165652ec7f4968aa86103ad010525b_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\dc165652ec7f4968aa86103ad010525b_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.3709,
+            "bbox_xyxy": [
+                155,
+                0,
+                311,
+                268
+            ],
+            "bbox_area_pixels": 41808,
+            "mask_pixels": 31087,
+            "coverage_percent_of_image": 31.9352,
+            "mask_path": "pipeline_outputs\\masks\\dc165652ec7f4968aa86103ad010525b_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\dc165652ec7f4968aa86103ad010525b_crop_0.png",
+            "crop_box_xyxy": [
+                145,
+                0,
+                311,
+                268
+            ]
+        },
+        {
+            "id": 1,
+            "class_name": "biofouling",
+            "confidence": 0.2945,
+            "bbox_xyxy": [
+                258,
+                0,
+                312,
+                187
+            ],
+            "bbox_area_pixels": 10098,
+            "mask_pixels": 8528,
+            "coverage_percent_of_image": 8.7607,
+            "mask_path": "pipeline_outputs\\masks\\dc165652ec7f4968aa86103ad010525b_mask_1.png",
+            "crop_path": "pipeline_outputs\\crops\\dc165652ec7f4968aa86103ad010525b_crop_1.png",
+            "crop_box_xyxy": [
+                257,
+                0,
+                311,
+                177
+            ]
+        }
+    ]
+}

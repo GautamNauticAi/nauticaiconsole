@@ -1,0 +1,5 @@
+# OpenClaw watcher (install into same venv as backend or system python3)
+watchdog>=3.0.0
+requests>=2.28.0
+python-dotenv>=1.0.0
+PyYAML>=6.0

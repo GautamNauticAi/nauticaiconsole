@@ -1126,7 +1126,7 @@ async def run_inspection_batch(
         if telegram_notify:
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
-                telegram_notify.send_inspection_result(vessel_id, report_payloads[0], pdf_path)
+                telegram_notify.send_inspection_result(vessel_id, report_payloads, pdf_path)
             except Exception:
                 pass
         return JSONResponse(content={"reports": report_payloads})
@@ -1215,7 +1215,7 @@ async def run_inspection(
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
                 telegram_notify.send_inspection_result(
-                    vessel_id, report_payloads[0], pdf_path
+                    vessel_id, report_payloads, pdf_path
                 )
             except Exception:
                 pass

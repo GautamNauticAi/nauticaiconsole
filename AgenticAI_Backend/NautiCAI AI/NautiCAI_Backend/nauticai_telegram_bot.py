@@ -12,10 +12,21 @@ import urllib.parse
 import urllib.error
 from pathlib import Path
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
+
     _dir = Path(__file__).resolve().parent
-    load_dotenv(_dir / ".env")
-    load_dotenv(_dir.parent.parent.parent / ".env")  # NautiCAI root
+    _root_env = _dir.parent.parent.parent / ".env"  # NautiCAI repo root
+    _local_env = _dir / ".env"
+    # Merge non-empty values only: empty TELEGRAM_BOT_TOKEN= in backend .env must not
+    # wipe a token set in NautiCAI/.env (load_dotenv default merge cannot do that).
+    _merged = {}
+    for _path in (_root_env, _local_env):
+        if _path.is_file():
+            for _k, _v in dotenv_values(_path).items():
+                if _v is not None and str(_v).strip() != "":
+                    _merged[_k] = str(_v).strip()
+    for _k, _v in _merged.items():
+        os.environ[_k] = _v
 except ImportError:
     pass
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,14 +41,13 @@ from telegram.ext import (
 )
 
 # ==========================================
-# TELEGRAM TOKEN (from .env or env; fallback so bot runs without .env)
+# TELEGRAM TOKEN (from .env or environment only — never commit tokens)
 # ==========================================
 TELEGRAM_BOT_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
 if not TELEGRAM_BOT_TOKEN:
-    # Fallback so Charan's bot runs without creating .env (override with .env for production)
-    TELEGRAM_BOT_TOKEN = "7968237881:AAEMoCXoZUw8QAw0PDL3jwT6dCPdGDSvuow"
-if not TELEGRAM_BOT_TOKEN:
-    print("[NautiCAI Bot] WARNING: TELEGRAM_BOT_TOKEN not set. Set it in .env or environment.")
+    print("[NautiCAI Bot] TELEGRAM_BOT_TOKEN is not set.")
+    print("  Add to AgenticAI_Backend/.../NautiCAI_Backend/.env or NautiCAI/.env:")
+    print('  TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."')
 
 # API base URL for validating username (same server as nauticai_api)
 TELEGRAM_VALIDATE_URL = (os.environ.get("TELEGRAM_VALIDATE_URL") or os.environ.get("NEXT_PUBLIC_API_URL") or "http://localhost:8000").rstrip("/")
@@ -265,11 +275,32 @@ def _start_health_server():
 # ==========================================
 # START THE BOT
 # ==========================================
+def _can_reach_telegram_api() -> bool:
+    """Fail fast with a clear message if DNS/network blocks api.telegram.org (common on Windows: 11001)."""
+    import socket
+
+    host, port = "api.telegram.org", 443
+    try:
+        socket.create_connection((host, port), timeout=8)
+        return True
+    except OSError as e:
+        print(
+            "[NautiCAI Bot] Cannot reach api.telegram.org:443 — bot needs the public internet.\n"
+            "  Common causes: Wi‑Fi off, VPN/DNS issue, corporate firewall, or typo in proxy env vars.\n"
+            "  Windows error 11001 = getaddrinfo failed (hostname could not be resolved).\n"
+            f"  Detail: {e}"
+        )
+        return False
+
+
 def main():
     # Start health server first so Cloud Run startup probe passes (must listen on PORT)
     _start_health_server()
     if not TELEGRAM_BOT_TOKEN:
-        print("[NautiCAI Bot] Cannot start: TELEGRAM_BOT_TOKEN is not set.")
+        print("[NautiCAI Bot] Cannot start: TELEGRAM_BOT_TOKEN is not set (see messages above).")
+        return
+    if not _can_reach_telegram_api():
+        print("[NautiCAI Bot] Fix network/DNS, then run again.")
         return
     print("[NautiCAI Bot] Starting Telegram Bot...")
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()

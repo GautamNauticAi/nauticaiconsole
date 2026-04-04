@@ -1,0 +1,38 @@
+{
+    "image": "366ffb60bfa34cf8ba936c24dd17920a.jpg",
+    "image_path": "temp_uploads\\366ffb60bfa34cf8ba936c24dd17920a.jpg",
+    "image_width": 312,
+    "image_height": 312,
+    "image_area_pixels": 97344,
+    "num_detections": 1,
+    "total_fouling_pixels": 97295,
+    "coverage_percent": 99.9497,
+    "severity": "High",
+    "annotated_path": "pipeline_outputs\\annotated\\366ffb60bfa34cf8ba936c24dd17920a_annotated.jpg",
+    "overlay_path": "pipeline_outputs\\overlay\\366ffb60bfa34cf8ba936c24dd17920a_overlay.jpg",
+    "union_mask_path": "pipeline_outputs\\masks\\366ffb60bfa34cf8ba936c24dd17920a_union_mask.png",
+    "detections": [
+        {
+            "id": 0,
+            "class_name": "biofouling",
+            "confidence": 0.9808,
+            "bbox_xyxy": [
+                0,
+                1,
+                311,
+                311
+            ],
+            "bbox_area_pixels": 96410,
+            "mask_pixels": 97295,
+            "coverage_percent_of_image": 99.9497,
+            "mask_path": "pipeline_outputs\\masks\\366ffb60bfa34cf8ba936c24dd17920a_mask_0.png",
+            "crop_path": "pipeline_outputs\\crops\\366ffb60bfa34cf8ba936c24dd17920a_crop_0.png",
+            "crop_box_xyxy": [
+                0,
+                0,
+                311,
+                311
+            ]
+        }
+    ]
+}

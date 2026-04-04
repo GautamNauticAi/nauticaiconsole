@@ -1,0 +1,17 @@
+{
+    "metadata": {
+        "vessel_id": "dataset3_biofouling_frame1n-421-_jpgrfa67ae75860490700fd1b3ffb3873b6a1",
+        "inspection_timestamp": "2026-04-04 17:59:42",
+        "system_status": "COMPLETED"
+    },
+    "ai_vision_metrics": {
+        "total_hull_coverage_percentage": 19.0643,
+        "severity": "High",
+        "total_detections": 1
+    },
+    "compliance_result": {
+        "official_imo_rating": "FR-3 (Medium Macrofouling)",
+        "recommended_action": "ACTION REQUIRED: Schedule cleaning soon.",
+        "requires_cleaning": true
+    }
+}
