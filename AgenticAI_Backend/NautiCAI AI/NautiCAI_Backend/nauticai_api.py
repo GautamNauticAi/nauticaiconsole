@@ -268,6 +268,54 @@ def _reports_folder(user_id: int) -> str:
     return folder
 
 
+def _clear_vessel_artifacts(reports_folder: str, vessel_id: str) -> None:
+    """
+    Remove previous JSON/annotated/PDF files for this vessel before writing a new run.
+    Prevents old multi-image files from being mixed into later runs with same vessel_id.
+    """
+    if not os.path.isdir(reports_folder):
+        return
+    prefix = f"{vessel_id}_"
+    for name in os.listdir(reports_folder):
+        if not name.startswith(prefix):
+            continue
+        path = os.path.join(reports_folder, name)
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError as e:
+            print(f"clear_vessel_artifacts warning ({name}): {e}")
+
+
+def _latest_image_count_for_vessel(user_id: int, vessel_id: str) -> Optional[int]:
+    """Best-effort latest image_count for this user+vessel from DB."""
+    if not POSTGRES_DSN or psycopg2 is None:
+        return None
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT image_count
+                FROM agentic_inspections
+                WHERE user_id = %s AND vessel_id = %s
+                ORDER BY inspection_timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                (user_id, vessel_id),
+            )
+            row = cur.fetchone()
+        if row and row.get("image_count") is not None:
+            return int(row["image_count"])
+    except Exception as e:
+        print(f"latest_image_count warning: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+    return None
+
+
 def _sanitize_vessel_id(raw: str) -> str:
     """Filesystem-safe vessel id: spaces -> underscores, strip invalid chars. Same id for storage and API response."""
     if not raw or not raw.strip():
@@ -597,7 +645,7 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
     return pdf_path
 
 
-def _collect_report_payloads(reports_folder, vessel_id):
+def _collect_report_payloads(reports_folder, vessel_id, max_images: Optional[int] = None):
     """
     Load per-image reports: _0.json, _1.json, ... in order.
     If any exist, return those (combined report). Otherwise fall back to single vessel_id_inspection_data.json.
@@ -606,6 +654,8 @@ def _collect_report_payloads(reports_folder, vessel_id):
     out = []
     idx = 0
     while True:
+        if max_images is not None and idx >= max_images:
+            break
         path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_{idx}.json")
         if not os.path.isfile(path):
             break
@@ -740,7 +790,8 @@ async def telegram_latest_pdf(username: str):
         pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
         if not os.path.isfile(pdf_path):
             # Build PDF on demand if we have JSON
-            collected = _collect_report_payloads(reports_folder, vessel_id)
+            expected_count = _latest_image_count_for_vessel(uid, vessel_id)
+            collected = _collect_report_payloads(reports_folder, vessel_id, max_images=expected_count)
             if collected:
                 if len(collected) > 1:
                     report_payloads = [p for _, p in collected]
@@ -1070,6 +1121,7 @@ async def run_inspection_batch(
     uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(uid)
+    _clear_vessel_artifacts(reports_folder, vessel_id)
     temp_folder = "temp_uploads"
     os.makedirs(temp_folder, exist_ok=True)
     report_payloads: List[dict] = []
@@ -1127,8 +1179,8 @@ async def run_inspection_batch(
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
                 telegram_notify.send_inspection_result(vessel_id, report_payloads, pdf_path)
-            except Exception:
-                pass
+            except Exception as tg_e:
+                print(f"Telegram notify warning (batch): {tg_e}")
         return JSONResponse(content={"reports": report_payloads})
     except HTTPException:
         raise
@@ -1152,6 +1204,8 @@ async def run_inspection(
     uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(uid)
+    if image_index <= 0:
+        _clear_vessel_artifacts(reports_folder, vessel_id)
     try:
         temp_folder = "temp_uploads"
         temp_image_path = _safe_temp_upload_path(temp_folder, image.filename)
@@ -1217,8 +1271,8 @@ async def run_inspection(
                 telegram_notify.send_inspection_result(
                     vessel_id, report_payloads, pdf_path
                 )
-            except Exception:
-                pass
+            except Exception as tg_e:
+                print(f"Telegram notify warning (single): {tg_e}")
 
         return JSONResponse(content={"reports": report_payloads})
 
@@ -1235,9 +1289,11 @@ async def run_inspection(
 async def get_vessel_reports(vessel_id: str, authorization: Optional[str] = Header(None)):
     """Returns all per-image reports so the frontend can show the batch slider and correct metrics."""
     user = _require_auth(authorization)
+    uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
-    reports_folder = _reports_folder(user["id"])
-    collected = _collect_report_payloads(reports_folder, vessel_id)
+    reports_folder = _reports_folder(uid)
+    expected_count = _latest_image_count_for_vessel(uid, vessel_id)
+    collected = _collect_report_payloads(reports_folder, vessel_id, max_images=expected_count)
     report_payloads = [p for _, p in collected]
     return JSONResponse(content={"reports": report_payloads})
 
@@ -1280,9 +1336,11 @@ async def get_annotated_image(vessel_id: str, index: int = 0, authorization: Opt
 @app.get("/api/vessel/{vessel_id}/pdf")
 async def download_pdf(vessel_id: str, authorization: Optional[str] = Header(None)):
     user = _require_auth(authorization)
+    uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
-    reports_folder = _reports_folder(user["id"])
-    collected = _collect_report_payloads(reports_folder, vessel_id)
+    reports_folder = _reports_folder(uid)
+    expected_count = _latest_image_count_for_vessel(uid, vessel_id)
+    collected = _collect_report_payloads(reports_folder, vessel_id, max_images=expected_count)
     if not collected:
         raise HTTPException(
             status_code=404,
