@@ -156,6 +156,12 @@ TIMEOUT_GRACE_SECONDS = 180  # After read-timeout, poll backend to confirm compl
 TIMEOUT_GRACE_POLL_SECONDS = 6
 HEALTH_CHECK_RETRY = 5      # Retry backend health check this many times
 HEALTH_CHECK_WAIT  = 10     # Seconds between health check retries
+BATCH_KEY_MODE = (os.environ.get("OPENCLAW_BATCH_KEY_MODE") or "vessel").strip().lower()
+if BATCH_KEY_MODE not in {"vessel", "global"}:
+    BATCH_KEY_MODE = "vessel"
+WATCHER_NOTIFY_SUCCESS = (os.environ.get("OPENCLAW_NOTIFY_SUCCESS") or "").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 
 # Allowed image extensions
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".mp4", ".avi", ".mov"}
@@ -237,6 +243,9 @@ def extract_vessel_id(filename: str) -> str:
     stem = Path(filename).stem  # e.g. MV_PACIFIC_TRADER_20260403_001
     # Common dataset/export suffix (e.g. ".rf.<hash>") should not split batches.
     stem = re.sub(r"\.rf\.[0-9a-fA-F]+$", "", stem)
+    # Copy suffixes from desktop/file manager should not split batches.
+    stem = re.sub(r"(?i)[ _-]*copy(?:\(\d+\))?$", "", stem)
+    stem = stem.replace(".", "_")
     stem = stem.replace(" ", "_")
     parts = [p for p in stem.split("_") if p]
 
@@ -247,8 +256,16 @@ def extract_vessel_id(filename: str) -> str:
         # Skip extension-like markers embedded in names (e.g. *_jpg or *_png)
         if lower in {"jpg", "jpeg", "png", "webp", "bmp"}:
             continue
+        # Skip copy marker
+        if lower == "copy":
+            continue
         # Skip frame tokens in dataset-style names (frame0-14-41-50, frame1n-29-, ...)
         if lower.startswith("frame"):
+            continue
+        # Skip hash-like suffixes often appended by datasets/exporters.
+        if re.fullmatch(r"[0-9a-f]{10,}", lower):
+            continue
+        if re.fullmatch(r"[a-z]*rf[0-9a-f]{8,}", lower):
             continue
         # Skip 8-digit dates like 20260403
         if part.isdigit() and len(part) == 8:
@@ -274,15 +291,18 @@ def extract_vessel_id(filename: str) -> str:
 def queue_file_for_batch(path: Path) -> None:
     """Add a file to the in-memory batch queue for its vessel."""
     vessel_id = extract_vessel_id(path.name)
+    batch_key = "__global__" if BATCH_KEY_MODE == "global" else vessel_id
     now = time.time()
 
     with BATCH_LOCK:
-        state = BATCH_STATE.setdefault(vessel_id, {"files": [], "last_seen": now})
+        state = BATCH_STATE.setdefault(batch_key, {"files": [], "last_seen": now, "vessel_id": vessel_id})
+        if not state.get("vessel_id"):
+            state["vessel_id"] = vessel_id
         if path not in state["files"]:
             state["files"].append(path)
         state["last_seen"] = now
 
-    log.info(f"Queued for batch | vessel={vessel_id} | file={path.name}")
+    log.info(f"Queued for batch | vessel={state.get('vessel_id', vessel_id)} | key={batch_key} | file={path.name}")
 
 # ============================================================
 # BATCH WORKER
@@ -295,15 +315,16 @@ def get_ready_batches() -> list[tuple[str, list[Path]]]:
     ready = []
 
     with BATCH_LOCK:
-        for vessel_id, state in list(BATCH_STATE.items()):
+        for key, state in list(BATCH_STATE.items()):
             files = [p for p in state["files"] if p.exists()]
             if not files:
-                BATCH_STATE.pop(vessel_id, None)
+                BATCH_STATE.pop(key, None)
                 continue
 
             if now - state["last_seen"] >= BATCH_QUIET_SECONDS:
+                vessel_id = state.get("vessel_id") or (key if key != "__global__" else "inspection_batch")
                 ready.append((vessel_id, files))
-                BATCH_STATE.pop(vessel_id, None)
+                BATCH_STATE.pop(key, None)
 
     return ready
 
@@ -522,7 +543,8 @@ def process_batch(vessel_id: str, image_paths: list[Path]) -> None:
 
     if result:
         move_batch_to_processed(image_paths)
-        notify_result(vessel_id, result, elapsed)
+        if WATCHER_NOTIFY_SUCCESS:
+            notify_result(vessel_id, result, elapsed)
         for p in image_paths:
             write_audit_log(p.name, vessel_id, "processed", result, elapsed)
     else:
@@ -729,6 +751,8 @@ def main():
     log.info(f"Processed    : {PROCESSED_DIR}")
     log.info(f"Failed       : {FAILED_DIR}")
     log.info(f"Backend      : {BACKEND_URL}")
+    log.info(f"Batch mode   : {BATCH_KEY_MODE} (vessel/global)")
+    log.info(f"Notify success messages from watcher: {'on' if WATCHER_NOTIFY_SUCCESS else 'off'}")
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         log.info("Telegram alerts: enabled (startup/stop and pipeline notices)")
     else:
