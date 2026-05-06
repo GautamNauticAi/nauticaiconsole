@@ -1,0 +1,74 @@
+{
+  "image": "65e7f029bc0847f19e3992caf21286c4.jpg",
+  "image_path": "temp_uploads\\65e7f029bc0847f19e3992caf21286c4.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 3,
+  "total_fouling_pixels": 97558,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\65e7f029bc0847f19e3992caf21286c4_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9293000102043152,
+      "bbox_xyxy": [
+        0,
+        0,
+        124,
+        312
+      ],
+      "bbox_area_pixels": 38688,
+      "mask_pixels": 38688,
+      "coverage_percent_of_image": 39.7436,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.6775
+    },
+    {
+      "id": 1,
+      "class_name": "biofouling",
+      "confidence": 0.9214000105857849,
+      "bbox_xyxy": [
+        151,
+        0,
+        312,
+        194
+      ],
+      "bbox_area_pixels": 31234,
+      "mask_pixels": 31234,
+      "coverage_percent_of_image": 32.0862,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.7851
+    },
+    {
+      "id": 2,
+      "class_name": "debris",
+      "confidence": 0.32260000705718994,
+      "bbox_xyxy": [
+        165,
+        0,
+        312,
+        188
+      ],
+      "bbox_area_pixels": 27636,
+      "mask_pixels": 27636,
+      "coverage_percent_of_image": 28.39,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

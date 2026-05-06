@@ -1,0 +1,36 @@
+{
+  "image": "bd6bd18fc70d49b68b8d6c98de32716b.jpg",
+  "image_path": "temp_uploads\\bd6bd18fc70d49b68b8d6c98de32716b.jpg",
+  "image_width": 640,
+  "image_height": 640,
+  "image_area_pixels": 409600,
+  "num_detections": 1,
+  "total_fouling_pixels": 370788,
+  "coverage_percent": 90.5244,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\bd6bd18fc70d49b68b8d6c98de32716b_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "corrosion",
+      "confidence": 0.8815000057220459,
+      "bbox_xyxy": [
+        4,
+        47,
+        640,
+        630
+      ],
+      "bbox_area_pixels": 370788,
+      "mask_pixels": 370788,
+      "coverage_percent_of_image": 90.5244,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

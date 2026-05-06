@@ -1,0 +1,36 @@
+{
+  "image": "2f1784c1f9e248e68b42e81f70c878c6.jpg",
+  "image_path": "temp_uploads\\2f1784c1f9e248e68b42e81f70c878c6.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 1,
+  "total_fouling_pixels": 71841,
+  "coverage_percent": 73.8012,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\2f1784c1f9e248e68b42e81f70c878c6_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9559000134468079,
+      "bbox_xyxy": [
+        0,
+        0,
+        231,
+        311
+      ],
+      "bbox_area_pixels": 71841,
+      "mask_pixels": 71841,
+      "coverage_percent_of_image": 73.8012,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.8801
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

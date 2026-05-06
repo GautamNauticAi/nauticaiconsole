@@ -1,0 +1,36 @@
+{
+  "image": "173eb8a4df5f48d684e21f849bbabeff.jpg",
+  "image_path": "temp_uploads\\173eb8a4df5f48d684e21f849bbabeff.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 1,
+  "total_fouling_pixels": 62511,
+  "coverage_percent": 64.2166,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\173eb8a4df5f48d684e21f849bbabeff_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.961899995803833,
+      "bbox_xyxy": [
+        0,
+        0,
+        201,
+        311
+      ],
+      "bbox_area_pixels": 62511,
+      "mask_pixels": 62511,
+      "coverage_percent_of_image": 64.2166,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "algae",
+      "species_confidence": 0.978
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

@@ -231,6 +231,8 @@ export default function ResultsPage() {
     ? (agenticBatch[batchIndex] ?? agenticBatch[0])
     : agenticReport;
   const ndtComputed = currentReport && ndtData ? computeNdtMetrics(ndtData, currentReport) : undefined;
+  const batchSource = (currentReport?.metadata?.inspection_source || "").trim().toLowerCase();
+  const runKindLabel = batchSource === "pipeline" ? "Pipeline inspection" : "Hull inspection";
 
   return (
     <PageShell>
@@ -245,11 +247,11 @@ export default function ResultsPage() {
               <span style={{ fontSize: 12, color: "rgba(186,230,255,0.55)" }}>Results</span>
             </div>
             <h1 style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
-              {currentReport ? `${currentReport.metadata.vessel_id} — Hull inspection` : "Hull inspection results"}
+              {currentReport ? `${currentReport.metadata.vessel_id} — ${runKindLabel}` : "Inspection results"}
             </h1>
             {currentReport && (
               <p style={{ fontSize: 12, color: "rgba(226,238,255,0.72)", marginTop: 6 }}>
-                Vessel ID:{" "}
+                Batch ID:{" "}
                 <span style={{ fontFamily: "monospace" }}>
                   {currentReport.metadata.vessel_id}
                 </span>

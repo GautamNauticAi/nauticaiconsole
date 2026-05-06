@@ -1,0 +1,36 @@
+{
+  "image": "169ff9d79bbf4a9998c57bf81c1cb141.jpg",
+  "image_path": "temp_uploads\\169ff9d79bbf4a9998c57bf81c1cb141.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 1,
+  "total_fouling_pixels": 40698,
+  "coverage_percent": 41.8084,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\169ff9d79bbf4a9998c57bf81c1cb141_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "debris",
+      "confidence": 0.6104,
+      "bbox_xyxy": [
+        0,
+        0,
+        153,
+        266
+      ],
+      "bbox_area_pixels": 40698,
+      "mask_pixels": 40698,
+      "coverage_percent_of_image": 41.8084,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

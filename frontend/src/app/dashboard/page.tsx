@@ -8,6 +8,42 @@ import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
 import { api } from "@/lib/api";
 import type { Inspection, Severity, DashboardStats } from "@/types";
 
+function anomalyCountForInspection(i: Inspection): number {
+  if (typeof i.total_detections === "number" && !Number.isNaN(i.total_detections)) {
+    return i.total_detections;
+  }
+  if (i.anomalies?.length) return i.anomalies.length;
+  const c = i.detected_classes;
+  if (Array.isArray(c)) return c.length;
+  if (typeof c === "string") {
+    try {
+      const arr = JSON.parse(c) as unknown;
+      return Array.isArray(arr) ? arr.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+function riskScoreForInspection(i: Inspection): number {
+  if (typeof i.risk_score === "number" && !Number.isNaN(i.risk_score)) {
+    return i.risk_score;
+  }
+  switch (i.risk_level) {
+    case "HIGH":
+    case "CRITICAL":
+      return 8.5;
+    case "MEDIUM":
+      return 5.5;
+    case "LOW":
+      return 3.0;
+    case "SAFE":
+    default:
+      return 1.0;
+  }
+}
+
 function computeStatsFromList(inspections: Inspection[]): DashboardStats {
   if (!inspections.length) {
     return { total_inspections: 0, high_risk_count: 0, total_anomalies: 0, avg_risk_score: 0 };
@@ -16,36 +52,9 @@ function computeStatsFromList(inspections: Inspection[]): DashboardStats {
   const high_risk_count = inspections.filter(
     (i) => i.risk_level === "HIGH" || i.risk_level === "CRITICAL"
   ).length;
-  const classCount = (i: Inspection): number => {
-    const c = i.detected_classes;
-    if (Array.isArray(c)) return c.length;
-    if (typeof c === "string") {
-      try {
-        const arr = JSON.parse(c) as unknown;
-        return Array.isArray(arr) ? arr.length : 0;
-      } catch {
-        return 0;
-      }
-    }
-    return 0;
-  };
-  const total_anomalies = inspections.reduce((sum, i) => sum + classCount(i), 0);
-  const riskScoreFor = (i: Inspection): number => {
-    switch (i.risk_level) {
-      case "HIGH":
-      case "CRITICAL":
-        return 8.5;
-      case "MEDIUM":
-        return 5.5;
-      case "LOW":
-        return 3.0;
-      case "SAFE":
-      default:
-        return 1.0;
-    }
-  };
+  const total_anomalies = inspections.reduce((sum, i) => sum + anomalyCountForInspection(i), 0);
   const avg_risk_score =
-    inspections.reduce((sum, i) => sum + riskScoreFor(i), 0) / total_inspections;
+    inspections.reduce((sum, i) => sum + riskScoreForInspection(i), 0) / total_inspections;
   return {
     total_inspections,
     high_risk_count,
@@ -117,6 +126,7 @@ export default function Dashboard() {
   const router = useRouter();
   const [inspections, setInspections] = useState<Inspection[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [batchSourceFilter, setBatchSourceFilter] = useState<"all" | "hull" | "pipeline">("all");
   const [deleteModalInspection, setDeleteModalInspection] = useState<Inspection | null>(null);
   const [displayUsername, setDisplayUsername] = useState<string | null>(null);
   useEffect(() => {
@@ -186,10 +196,17 @@ export default function Dashboard() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [fetchList]);
 
-  const effectiveInspections: Inspection[] = inspections ?? [];
+  const visibleInspections: Inspection[] = useMemo(() => {
+    const list = inspections ?? [];
+    if (batchSourceFilter === "all") return list;
+    return list.filter(
+      (i) => (i.inspection_source || "").toLowerCase() === batchSourceFilter
+    );
+  }, [inspections, batchSourceFilter]);
+
   const effectiveStats = useMemo(
-    () => computeStatsFromList(effectiveInspections),
-    [effectiveInspections]
+    () => computeStatsFromList(visibleInspections),
+    [visibleInspections]
   );
 
   const breakdownBase = [
@@ -201,7 +218,7 @@ export default function Dashboard() {
 
   const computedBreakdown = breakdownBase.map((row) => {
     let count = 0;
-    for (const ins of effectiveInspections) {
+    for (const ins of visibleInspections) {
       const anyIns = ins as any;
       const fromDetected = Array.isArray(anyIns.detected_classes)
         ? anyIns.detected_classes
@@ -284,9 +301,33 @@ export default function Dashboard() {
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 10,
             }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(226,232,240,0.96)" }}>Recent inspections</span>
-              <Link href="/reports" style={{ fontSize: 12, color: "rgba(148,163,184,0.9)", textDecoration: "none", fontWeight: 600 }}>View all</Link>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {(["all", "hull", "pipeline"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setBatchSourceFilter(k)}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(129,140,248,0.35)",
+                      cursor: "pointer",
+                      background: batchSourceFilter === k ? "rgba(129,140,248,0.35)" : "transparent",
+                      color: batchSourceFilter === k ? "#f1f5f9" : "#94a3b8",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {k === "all" ? "All batches" : k}
+                  </button>
+                ))}
+                <Link href="/reports" style={{ fontSize: 12, color: "rgba(148,163,184,0.9)", textDecoration: "none", fontWeight: 600 }}>View all</Link>
+              </div>
             </div>
 
             <div style={{ overflowX: "auto" }}>
@@ -331,7 +372,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {effectiveInspections.length === 0 && !loading && (
+                  {visibleInspections.length === 0 && !loading && (
                     <tr>
                       <td colSpan={8} style={{ padding: "40px 16px", textAlign: "center", color: "rgba(148,163,184,0.9)", fontSize: 13 }}>No inspections yet. Run one from Inspect.</td>
                     </tr>
@@ -341,11 +382,11 @@ export default function Dashboard() {
                       <td colSpan={8} style={{ padding: "32px 16px", textAlign: "center", color: "rgba(148,163,184,0.8)", fontSize: 13 }}>Loading…</td>
                     </tr>
                   )}
-                  {!loading && effectiveInspections.map((ins, i) => (
+                  {!loading && visibleInspections.map((ins, i) => (
                     <tr
                       key={ins.id}
                       style={{
-                        borderBottom: i < effectiveInspections.length - 1 ? "1px solid rgba(129,140,248,0.12)" : "none",
+                        borderBottom: i < visibleInspections.length - 1 ? "1px solid rgba(129,140,248,0.12)" : "none",
                       }}
                     >
                       <td style={{ padding: "12px 14px", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -355,19 +396,13 @@ export default function Dashboard() {
                         <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(191,219,254,0.9)" }}>{(ins as any).image_count ?? 1}</span>
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "center" }}>
-                        {(() => {
-                          const anyIns = ins as any;
-                          const anomaliesArr = Array.isArray(anyIns.anomalies) ? anyIns.anomalies : Array.isArray(anyIns.detected_classes) ? anyIns.detected_classes : [];
-                          return <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{anomaliesArr.length}</span>;
-                        })()}
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
+                          {anomalyCountForInspection(ins)}
+                        </span>
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "center" }}>
                         {ins.status === "completed" ? (
-                          (() => {
-                            const anyIns = ins as any;
-                            const numeric = typeof anyIns.risk_score === "number" ? anyIns.risk_score : anyIns.risk_level === "HIGH" || anyIns.risk_level === "CRITICAL" ? 8.5 : anyIns.risk_level === "MEDIUM" ? 5.5 : anyIns.risk_level === "LOW" ? 3.0 : 1.0;
-                            return <RiskBadge score={numeric} />;
-                          })()
+                          <RiskBadge score={riskScoreForInspection(ins)} />
                         ) : <span style={{ color: "#64748b", fontSize: 12 }}>—</span>}
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "center" }}>

@@ -2,6 +2,8 @@
 NautiCAI – AI Vision pipeline for maritime hull inspection (biofouling detection).
 Uses YOLO for detection + SAM for segmentation → coverage % and severity per image.
 """
+from __future__ import annotations
+
 import os
 import platform
 import sys
@@ -24,7 +26,6 @@ if sys.platform.startswith("linux"):
 import cv2
 import json
 import tempfile
-import torch
 import numpy as np
 
 
@@ -50,77 +51,88 @@ def _is_jetson_like() -> bool:
         return False
 
 
-def _patch_torchvision_nms_if_broken() -> None:
+_agentic_stack_loaded = False
+_UltralyticsYOLO = None  # type: ignore[assignment]
+
+
+def _ensure_agentic_stack() -> None:
     """
-    Ultralytics YOLO calls torchvision.ops.nms (and sometimes batched_nms). On Jetson,
-    PyPI torchvision is built for stock PyTorch; NVIDIA's torch wheel breaks C++ ops.
-    Install pure-Python fallbacks when the default ops fail to load.
+    Import torch, torchvision patch, Ultralytics YOLO, and SAM only when agentic path runs.
+    Avoids a long import chain (torchvision → sympy, etc.) at API startup when only Prasad/Aishwarya are used.
     """
-    try:
-        import torchvision.ops as _tv_ops
+    global _agentic_stack_loaded, _UltralyticsYOLO, sam_model_registry, SamPredictor
+    if _agentic_stack_loaded:
+        return
+    import torch as _torch
 
-        _b = torch.tensor([[0.0, 0.0, 1.0, 1.0], [0.1, 0.1, 1.1, 1.1]], dtype=torch.float32)
-        _s = torch.tensor([0.9, 0.8], dtype=torch.float32)
-        _tv_ops.nms(_b, _s, 0.5)
-    except Exception:
-        import torchvision.ops as _tv_ops
+    def _patch_torchvision_nms_if_broken() -> None:
+        try:
+            import torchvision.ops as _tv_ops
 
-        def _nms_pure_torch(
-            boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float
-        ) -> torch.Tensor:
-            if boxes.numel() == 0:
-                return torch.empty((0,), dtype=torch.long, device=boxes.device)
-            x1, y1, x2, y2 = boxes.unbind(dim=1)
-            areas = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
-            order = scores.argsort(descending=True)
-            keep = []
-            while order.numel() > 0:
-                i = order[0]
-                keep.append(i)
-                if order.numel() == 1:
-                    break
-                rest = order[1:]
-                xx1 = x1[rest].clamp(min=x1[i])
-                yy1 = y1[rest].clamp(min=y1[i])
-                xx2 = x2[rest].clamp(max=x2[i])
-                yy2 = y2[rest].clamp(max=y2[i])
-                inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
-                iou = inter / (areas[i] + areas[rest] - inter + 1e-7)
-                order = rest[iou <= iou_threshold]
+            _b = _torch.tensor([[0.0, 0.0, 1.0, 1.0], [0.1, 0.1, 1.1, 1.1]], dtype=_torch.float32)
+            _s = _torch.tensor([0.9, 0.8], dtype=_torch.float32)
+            _tv_ops.nms(_b, _s, 0.5)
+        except Exception:
+            import torchvision.ops as _tv_ops
 
-            return torch.stack(keep) if keep else torch.empty(0, dtype=torch.long, device=boxes.device)
+            def _nms_pure_torch(boxes, scores, iou_threshold: float):
+                if boxes.numel() == 0:
+                    return _torch.empty((0,), dtype=_torch.long, device=boxes.device)
+                x1, y1, x2, y2 = boxes.unbind(dim=1)
+                areas = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
+                order = scores.argsort(descending=True)
+                keep = []
+                while order.numel() > 0:
+                    i = order[0]
+                    keep.append(i)
+                    if order.numel() == 1:
+                        break
+                    rest = order[1:]
+                    xx1 = x1[rest].clamp(min=x1[i])
+                    yy1 = y1[rest].clamp(min=y1[i])
+                    xx2 = x2[rest].clamp(max=x2[i])
+                    yy2 = y2[rest].clamp(max=y2[i])
+                    inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
+                    iou = inter / (areas[i] + areas[rest] - inter + 1e-7)
+                    order = rest[iou <= iou_threshold]
 
-        def _batched_nms_pure_torch(
-            boxes: torch.Tensor,
-            scores: torch.Tensor,
-            idxs: torch.Tensor,
-            iou_threshold: float,
-        ) -> torch.Tensor:
-            if boxes.numel() == 0:
-                return torch.empty((0,), dtype=torch.long, device=boxes.device)
-            out = []
-            for c in torch.unique(idxs):
-                m = idxs == c
-                b = boxes[m]
-                s = scores[m]
-                orig = torch.nonzero(m, as_tuple=False).squeeze(1)
-                sub = _nms_pure_torch(b, s, iou_threshold)
-                out.append(orig[sub])
-            if not out:
-                return torch.empty((0,), dtype=torch.long, device=boxes.device)
-            return torch.cat(out)
+                return _torch.stack(keep) if keep else _torch.empty(0, dtype=_torch.long, device=boxes.device)
 
-        _tv_ops.nms = _nms_pure_torch  # type: ignore[assignment]
-        _tv_ops.batched_nms = _batched_nms_pure_torch  # type: ignore[assignment]
-        print(
-            "[NautiCAI] torchvision.ops NMS unavailable (Jetson/torch mismatch); using PyTorch fallbacks."
-        )
+            def _batched_nms_pure_torch(boxes, scores, idxs, iou_threshold: float):
+                if boxes.numel() == 0:
+                    return _torch.empty((0,), dtype=_torch.long, device=boxes.device)
+                out = []
+                for c in _torch.unique(idxs):
+                    m = idxs == c
+                    b = boxes[m]
+                    s = scores[m]
+                    orig = _torch.nonzero(m, as_tuple=False).squeeze(1)
+                    sub = _nms_pure_torch(b, s, iou_threshold)
+                    out.append(orig[sub])
+                if not out:
+                    return _torch.empty((0,), dtype=_torch.long, device=boxes.device)
+                return _torch.cat(out)
+
+            _tv_ops.nms = _nms_pure_torch  # type: ignore[assignment]
+            _tv_ops.batched_nms = _batched_nms_pure_torch  # type: ignore[assignment]
+            print(
+                "[NautiCAI] torchvision.ops NMS unavailable (Jetson/torch mismatch); using PyTorch fallbacks."
+            )
+
+    _patch_torchvision_nms_if_broken()
+    from ultralytics import YOLO as _YOLO
+    from segment_anything import sam_model_registry as _smr, SamPredictor as _SP
+
+    _UltralyticsYOLO = _YOLO
+    globals()["sam_model_registry"] = _smr
+    globals()["SamPredictor"] = _SP
+    globals()["torch"] = _torch
+    _agentic_stack_loaded = True
 
 
-_patch_torchvision_nms_if_broken()
-
-from ultralytics import YOLO
-from segment_anything import sam_model_registry, SamPredictor
+# SAM registry / predictor types — populated by _ensure_agentic_stack()
+sam_model_registry = None  # type: ignore[assignment]
+SamPredictor = None  # type: ignore[assignment]
 
 # =========================
 # CONFIG (set these or pass to run_pipeline)
@@ -130,6 +142,38 @@ SAM_CHECKPOINT_PATH = os.environ.get("NAUTICAI_SAM_PATH", "sam_checkpoints/sam_v
 OUTPUT_DIR = os.environ.get("NAUTICAI_OUTPUT_DIR", "pipeline_outputs")
 # Cap image max side (px) for inference to speed up; 0 = no resize. e.g. 1280 for faster runs.
 MAX_INFERENCE_SIZE = int(os.environ.get("NAUTICAI_MAX_INFERENCE_SIZE", "0") or "0")
+
+
+def hull_engine() -> str:
+    """
+    agentic — YOLO + SAM in this module (default).
+    prasad — multi-YOLO + ResNet via nauticai_prasad_engine.py (weights: NAUTICAI_PRASAD_MODEL_DIR or _REPO).
+    """
+    return (os.environ.get("NAUTICAI_HULL_ENGINE") or "agentic").strip().lower()
+
+
+def engine_for_source(inspection_source=None) -> str:
+    """
+    Route by source folder/tag when provided:
+      hull     -> NAUTICAI_HULL_FOLDER_ENGINE (default: prasad)
+      pipeline -> NAUTICAI_PIPELINE_FOLDER_ENGINE (default: aishwarya)
+    Else fall back to NAUTICAI_HULL_ENGINE.
+    """
+    src = (inspection_source or "").strip().lower()
+    if src == "hull":
+        return (os.environ.get("NAUTICAI_HULL_FOLDER_ENGINE") or "prasad").strip().lower()
+    if src == "pipeline":
+        return (os.environ.get("NAUTICAI_PIPELINE_FOLDER_ENGINE") or "aishwarya").strip().lower()
+    return hull_engine()
+
+
+def should_preload_agentic() -> bool:
+    """Whether startup should preload Agentic YOLO+SAM (needed if any routed source uses agentic)."""
+    return "agentic" in {
+        hull_engine(),
+        (os.environ.get("NAUTICAI_HULL_FOLDER_ENGINE") or "prasad").strip().lower(),
+        (os.environ.get("NAUTICAI_PIPELINE_FOLDER_ENGINE") or "aishwarya").strip().lower(),
+    }
 
 # Resolved in load_models() so CUDA is checked when weights load (import-time can be wrong on some Jetsons).
 DEVICE = "cpu"
@@ -207,21 +251,24 @@ def get_severity(coverage_percent):
 
 
 def load_models(yolo_path=None, sam_path=None):
-    """Load YOLO and SAM models. Call once before process_image."""
+    """Load Agentic YOLO and SAM models. Call once before agentic process_image runs."""
     global yolo_model, sam_predictor, DEVICE
+    if yolo_model is not None and sam_predictor is not None:
+        return yolo_model, sam_predictor
+    _ensure_agentic_stack()
     yolo_path = yolo_path or YOLO_MODEL_PATH
     sam_path = sam_path or SAM_CHECKPOINT_PATH
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     if DEVICE == "cpu":
         print("[NautiCAI] Running on CPU – detection will be slower. GPU (CUDA) recommended.")
-    yolo_model = YOLO(yolo_path)
+    yolo_model = _UltralyticsYOLO(yolo_path)
     sam = sam_model_registry["vit_b"](checkpoint=sam_path)
     sam.to(device=DEVICE)
     sam_predictor = SamPredictor(sam)
     return yolo_model, sam_predictor
 
 
-def process_image(image_path, conf=0.25, output_dir=None):
+def process_image(image_path, conf=0.25, output_dir=None, inspection_source=None):
     """
     Run full pipeline on one image: YOLO detect → SAM segment → coverage & report.
     Writes annotated, overlay, masks, crops, and per-image JSON under output_dir.
@@ -232,6 +279,26 @@ def process_image(image_path, conf=0.25, output_dir=None):
     - Large images: full-resolution encoding in SAM is costly.
     Set NAUTICAI_MAX_INFERENCE_SIZE=1280 (or 1024) to cap image size and speed up.
     """
+    chosen_engine = engine_for_source(inspection_source)
+    if chosen_engine == "prasad":
+        from nauticai_prasad_multimodel import process_image_prasad
+
+        return process_image_prasad(image_path, conf=conf, output_dir=output_dir)
+    if chosen_engine == "aishwarya":
+        from nauticai_aishwarya_pipeline import process_image_aishwarya
+
+        return process_image_aishwarya(
+            image_path,
+            conf=conf,
+            output_dir=output_dir,
+            inspection_source=inspection_source,
+        )
+    if chosen_engine != "agentic":
+        raise ValueError(
+            f"Unknown hull engine '{chosen_engine}' for source '{inspection_source}'. "
+            "Use agentic, prasad, or aishwarya."
+        )
+    _ensure_agentic_stack()
     if yolo_model is None or sam_predictor is None:
         raise RuntimeError("Call load_models() first.")
     out = output_dir or OUTPUT_DIR
@@ -297,6 +364,7 @@ def process_image(image_path, conf=0.25, output_dir=None):
             "overlay_path": None,
             "union_mask_path": None,
             "detections": [],
+            "engine": "agentic_yolo_sam",
         }
 
     keep = non_max_suppression_boxes(boxes, scores, iou_threshold=0.5)
@@ -376,6 +444,7 @@ def process_image(image_path, conf=0.25, output_dir=None):
         "overlay_path": overlay_path,
         "union_mask_path": union_mask_path,
         "detections": detections_data,
+        "engine": "agentic_yolo_sam",
     }
     with open(json_path, "w") as f:
         json.dump(report, f, indent=4)

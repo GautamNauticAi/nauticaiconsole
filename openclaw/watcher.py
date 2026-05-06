@@ -21,7 +21,8 @@
 #   python3 openclaw/watcher.py
 #
 # Env (see ../.env.example):
-#   BACKEND_URL, OPENCLAW_API_TOKEN, OPENCLAW_INCOMING_DIR, OPENCLAW_PROCESSED_DIR, OPENCLAW_FAILED_DIR
+#   BACKEND_URL, OPENCLAW_API_TOKEN, OPENCLAW_INCOMING_DIR, OPENCLAW_PIPELINE_INCOMING_DIR,
+#   OPENCLAW_PROCESSED_DIR, OPENCLAW_FAILED_DIR
 #
 # Auto-start on Jetson boot:
 #   sudo systemctl enable nauticai-watcher
@@ -122,6 +123,12 @@ def _path_from_env(key: str, default: Path) -> Path:
 
 # Folders (override with OPENCLAW_* — e.g. watch ~/Downloads/check)
 INCOMING_DIR = _path_from_env("OPENCLAW_INCOMING_DIR", PROJECT_ROOT / "incoming")
+_PIPELINE_INCOMING_RAW = (os.environ.get("OPENCLAW_PIPELINE_INCOMING_DIR") or "").strip()
+PIPELINE_INCOMING_DIR: Optional[Path] = (
+    _path_from_env("OPENCLAW_PIPELINE_INCOMING_DIR", PROJECT_ROOT / "incoming_pipeline")
+    if _PIPELINE_INCOMING_RAW
+    else None
+)
 PROCESSED_DIR = _path_from_env("OPENCLAW_PROCESSED_DIR", PROJECT_ROOT / "processed")
 FAILED_DIR = _path_from_env("OPENCLAW_FAILED_DIR", PROJECT_ROOT / "failed")
 LOG_FILE = PROJECT_ROOT / "openclaw" / "watcher.log"
@@ -154,11 +161,19 @@ BACKEND_TIMEOUT_PER_IMAGE = 15  # Extra seconds per image for large batches
 BACKEND_TIMEOUT_MAX = 1800  # Hard cap for one request timeout (30 min)
 TIMEOUT_GRACE_SECONDS = 180  # After read-timeout, poll backend to confirm completion
 TIMEOUT_GRACE_POLL_SECONDS = 6
+DEFAULT_INSPECTION_SOURCE = (os.environ.get("OPENCLAW_INSPECTION_SOURCE") or "auto").strip().lower()
+DELETE_AFTER_INSPECTION = (os.environ.get("OPENCLAW_DELETE_AFTER_INSPECTION") or "").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 HEALTH_CHECK_RETRY = 5      # Retry backend health check this many times
 HEALTH_CHECK_WAIT  = 10     # Seconds between health check retries
 BATCH_KEY_MODE = (os.environ.get("OPENCLAW_BATCH_KEY_MODE") or "vessel").strip().lower()
 if BATCH_KEY_MODE not in {"vessel", "global"}:
     BATCH_KEY_MODE = "vessel"
+# For BATCH_KEY_MODE=global: unique → hull1, pipeline2 (separate counters); global → OPENCLAW_GLOBAL_VESSEL_ID (+ _pipeline)
+BATCH_VESSEL_MODE = (os.environ.get("OPENCLAW_BATCH_VESSEL_MODE") or "unique").strip().lower()
+if BATCH_VESSEL_MODE not in {"unique", "global"}:
+    BATCH_VESSEL_MODE = "unique"
 WATCHER_NOTIFY_SUCCESS = (os.environ.get("OPENCLAW_NOTIFY_SUCCESS") or "").strip().lower() in {
     "1", "true", "yes", "on"
 }
@@ -169,9 +184,11 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".mp4", ".avi", 
 # In-memory batch state
 # Structure:
 # {
-#   vessel_id: {
+#   batch_key: {  # vessel_id, or "__global__|hull" / "__global__|pipeline"
 #       "files": [Path(...), Path(...)],
-#       "last_seen": <timestamp>
+#       "last_seen": <timestamp>,
+#       "vessel_id": <parsed from filename>,
+#       "inspection_source": "hull"|"pipeline"|...
 #   }
 # }
 BATCH_STATE = {}
@@ -283,33 +300,116 @@ def extract_vessel_id(filename: str) -> str:
 
     return vessel_id[:200]  # Cap length
 
+
+def infer_inspection_source(path: Path) -> str:
+    """
+    Resolve source tag sent to backend:
+      1) OPENCLAW_INSPECTION_SOURCE if set to non-auto
+      2) if path is under OPENCLAW_PIPELINE_INCOMING_DIR -> pipeline
+      3) if path is under OPENCLAW_INCOMING_DIR -> hull
+      4) infer from directory/file tokens (hull/pipeline)
+      5) default to hull
+    """
+    if DEFAULT_INSPECTION_SOURCE and DEFAULT_INSPECTION_SOURCE != "auto":
+        return DEFAULT_INSPECTION_SOURCE
+    rp = path.resolve()
+    if PIPELINE_INCOMING_DIR is not None:
+        try:
+            rp.relative_to(PIPELINE_INCOMING_DIR.resolve())
+            return "pipeline"
+        except ValueError:
+            pass
+    try:
+        rp.relative_to(INCOMING_DIR.resolve())
+        return "hull"
+    except ValueError:
+        pass
+
+    tokens = [p.lower() for p in path.parts]
+    probe = " ".join(tokens)
+    if "pipeline" in probe:
+        return "pipeline"
+    if "hull" in probe:
+        return "hull"
+    return "hull"
+
 # ============================================================
 # BATCH QUEUE HELPERS
 # Group files by vessel and wait for quiet period before processing
 # ============================================================
 
+_BATCH_VESSEL_COUNTERS_PATH = PROJECT_ROOT / "openclaw" / ".batch_vessel_counters.json"
+_batch_vessel_counter_lock = threading.Lock()
+
+
+def _read_batch_vessel_counters() -> dict:
+    if not _BATCH_VESSEL_COUNTERS_PATH.is_file():
+        return {"hull": 0, "pipeline": 0}
+    try:
+        raw = json.loads(_BATCH_VESSEL_COUNTERS_PATH.read_text(encoding="utf-8"))
+        return {
+            "hull": int(raw.get("hull", 0)),
+            "pipeline": int(raw.get("pipeline", 0)),
+        }
+    except Exception:
+        return {"hull": 0, "pipeline": 0}
+
+
+def allocate_batch_vessel_id(source_tag: str) -> str:
+    """
+    Stable per-source batch ids for global mode: hull1, hull2, pipeline1, ...
+    Persists under openclaw/.batch_vessel_counters.json so dashboard/reports stay one row per batch.
+    """
+    key = "pipeline" if (source_tag or "").strip().lower() == "pipeline" else "hull"
+    with _batch_vessel_counter_lock:
+        c = _read_batch_vessel_counters()
+        c[key] = int(c.get(key, 0)) + 1
+        n = c[key]
+        _BATCH_VESSEL_COUNTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _BATCH_VESSEL_COUNTERS_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(c, indent=0), encoding="utf-8")
+        tmp.replace(_BATCH_VESSEL_COUNTERS_PATH)
+    return f"{key}{n}"
+
+
 def queue_file_for_batch(path: Path) -> None:
     """Add a file to the in-memory batch queue for its vessel."""
     vessel_id = extract_vessel_id(path.name)
-    batch_key = "__global__" if BATCH_KEY_MODE == "global" else vessel_id
+    source = infer_inspection_source(path)
+    batch_key = (
+        f"__global__|{source}"
+        if BATCH_KEY_MODE == "global"
+        else vessel_id
+    )
     now = time.time()
 
     with BATCH_LOCK:
-        state = BATCH_STATE.setdefault(batch_key, {"files": [], "last_seen": now, "vessel_id": vessel_id})
+        state = BATCH_STATE.setdefault(
+            batch_key,
+            {"files": [], "last_seen": now, "vessel_id": vessel_id, "inspection_source": source},
+        )
         if not state.get("vessel_id"):
             state["vessel_id"] = vessel_id
+        if source and not state.get("inspection_source"):
+            state["inspection_source"] = source
         if path not in state["files"]:
             state["files"].append(path)
         state["last_seen"] = now
 
-    log.info(f"Queued for batch | vessel={state.get('vessel_id', vessel_id)} | key={batch_key} | file={path.name}")
+    log.info(
+        "Queued for batch | vessel=%s | source=%s | key=%s | file=%s",
+        state.get("vessel_id", vessel_id),
+        state.get("inspection_source") or "none",
+        batch_key,
+        path.name,
+    )
 
 # ============================================================
 # BATCH WORKER
 # Flush ready vessel batches after quiet period
 # ============================================================
 
-def get_ready_batches() -> list[tuple[str, list[Path]]]:
+def get_ready_batches() -> list[tuple[str, list[Path], str]]:
     """Return vessel batches that have been quiet long enough to process."""
     now = time.time()
     ready = []
@@ -322,23 +422,49 @@ def get_ready_batches() -> list[tuple[str, list[Path]]]:
                 continue
 
             if now - state["last_seen"] >= BATCH_QUIET_SECONDS:
-                vessel_id = state.get("vessel_id") or (key if key != "__global__" else "inspection_batch")
-                ready.append((vessel_id, files))
+                if key.startswith("__global__|"):
+                    # One combined API call per source in this quiet window.
+                    source_tag = key.split("|", 1)[1] if "|" in key else "hull"
+                    if BATCH_VESSEL_MODE == "unique":
+                        vessel_id = allocate_batch_vessel_id(source_tag)[:200]
+                    else:
+                        gv = (os.environ.get("OPENCLAW_GLOBAL_VESSEL_ID") or "").strip()
+                        base = (gv or state.get("vessel_id") or "inspection_batch").strip() or "inspection_batch"
+                        if source_tag == "pipeline":
+                            vessel_id = f"{base}_pipeline"[:200]
+                        else:
+                            vessel_id = base[:200]
+                elif key == "__global__":
+                    if BATCH_VESSEL_MODE == "unique":
+                        src = (state.get("inspection_source") or "hull").strip().lower() or "hull"
+                        vessel_id = allocate_batch_vessel_id(src)[:200]
+                    else:
+                        gv = (os.environ.get("OPENCLAW_GLOBAL_VESSEL_ID") or "").strip()
+                        vessel_id = (gv or state.get("vessel_id") or "inspection_batch")[:200]
+                else:
+                    vessel_id = state.get("vessel_id") or (key if key != "__global__" else "inspection_batch")
+                source = (state.get("inspection_source") or "").strip().lower()
+                ready.append((vessel_id, files, source))
                 BATCH_STATE.pop(key, None)
 
     return ready
 
 
-def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict]:
+def run_pipeline_batch(image_paths: list[Path], vessel_id: str, inspection_source: str = "") -> Optional[dict]:
     """
     Call the existing NautiCAI batch inspection pipeline.
     Returns result dict on success, None on failure.
     """
-    log.info(f"Triggering batch pipeline | vessel={vessel_id} | files={len(image_paths)}")
+    log.info(
+        "Triggering batch pipeline | vessel=%s | source=%s | files=%s",
+        vessel_id,
+        inspection_source or "none",
+        len(image_paths),
+    )
     start_time = time.time()
 
     try:
-        headers = {}
+        headers = {"X-NauticAI-Client": "openclaw"}
         if AUTH_TOKEN:
             headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
         expected_count = len(image_paths)
@@ -361,6 +487,8 @@ def run_pipeline_batch(image_paths: list[Path], vessel_id: str) -> Optional[dict
                 opened_files.append(("images", (image_path.name, f, "image/jpeg")))
 
             data = {"vessel_id": vessel_id}
+            if inspection_source:
+                data["inspection_source"] = inspection_source
             response = requests.post(
                 INSPECT_BATCH_URL,
                 files=opened_files,
@@ -468,7 +596,14 @@ def move_batch_to_failed(image_paths: list[Path]) -> None:
 
 
 def move_to_processed(image_path: Path) -> None:
-    """Move successfully processed image to processed/ folder."""
+    """Move successfully processed image to processed/ folder, or delete if configured."""
+    if DELETE_AFTER_INSPECTION:
+        try:
+            image_path.unlink(missing_ok=True)
+            log.info(f"Deleted after inspection: {image_path.name}")
+        except Exception as e:
+            log.warning(f"Delete after inspection failed for {image_path}: {e}")
+        return
     PROCESSED_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = PROCESSED_DIR / f"{timestamp}_{image_path.name}"
@@ -477,7 +612,14 @@ def move_to_processed(image_path: Path) -> None:
 
 
 def move_to_failed(image_path: Path) -> None:
-    """Move failed image to failed/ folder for manual retry."""
+    """Move failed image to failed/ folder, or delete if configured."""
+    if DELETE_AFTER_INSPECTION:
+        try:
+            image_path.unlink(missing_ok=True)
+            log.info(f"Deleted failed file after inspection: {image_path.name}")
+        except Exception as e:
+            log.warning(f"Delete failed file error for {image_path}: {e}")
+        return
     FAILED_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = FAILED_DIR / f"{timestamp}_{image_path.name}"
@@ -531,14 +673,19 @@ def notify_result(vessel_id: str, result: dict, elapsed: float) -> None:
     send_telegram("\n".join(lines))
 
 
-def process_batch(vessel_id: str, image_paths: list[Path]) -> None:
+def process_batch(vessel_id: str, image_paths: list[Path], inspection_source: str = "") -> None:
     """Process a completed batch for one vessel."""
     start = time.time()
     filenames = [p.name for p in image_paths]
 
-    log.info(f"Processing batch | vessel={vessel_id} | files={filenames}")
+    log.info(
+        "Processing batch | vessel=%s | source=%s | files=%s",
+        vessel_id,
+        inspection_source or "none",
+        filenames,
+    )
 
-    result = run_pipeline_batch(image_paths, vessel_id)
+    result = run_pipeline_batch(image_paths, vessel_id, inspection_source=inspection_source)
     elapsed = round(time.time() - start, 2)
 
     if result:
@@ -563,8 +710,10 @@ def start_batch_worker() -> None:
         while True:
             try:
                 ready = get_ready_batches()
-                for vessel_id, image_paths in ready:
-                    t = threading.Thread(target=process_batch, args=(vessel_id, image_paths), daemon=True)
+                for vessel_id, image_paths, source in ready:
+                    t = threading.Thread(
+                        target=process_batch, args=(vessel_id, image_paths, source), daemon=True
+                    )
                     t.start()
             except Exception as e:
                 log.error(f"Batch worker error: {e}")
@@ -679,9 +828,13 @@ def start_watcher() -> None:
                         self._processing.discard(str(path))
 
         INCOMING_DIR.mkdir(exist_ok=True)
-        handler  = ROVImageHandler()
+        handler = ROVImageHandler()
         observer = Observer()
         observer.schedule(handler, str(INCOMING_DIR), recursive=False)
+        if PIPELINE_INCOMING_DIR is not None and PIPELINE_INCOMING_DIR.resolve() != INCOMING_DIR.resolve():
+            PIPELINE_INCOMING_DIR.mkdir(exist_ok=True)
+            observer.schedule(handler, str(PIPELINE_INCOMING_DIR), recursive=False)
+            log.info(f"OpenClaw also watching (pipeline): {PIPELINE_INCOMING_DIR}")
         observer.start()
 
         log.info(f"OpenClaw watching: {INCOMING_DIR}")
@@ -714,14 +867,20 @@ def start_polling_watcher() -> None:
     send_telegram("NautiCAI OpenClaw is online (polling mode). Watching for ROV images.")
 
     seen = set()
+    poll_dirs = [INCOMING_DIR]
+    if PIPELINE_INCOMING_DIR is not None and PIPELINE_INCOMING_DIR.resolve() != INCOMING_DIR.resolve():
+        PIPELINE_INCOMING_DIR.mkdir(exist_ok=True)
+        poll_dirs.append(PIPELINE_INCOMING_DIR)
+        log.info(f"OpenClaw polling also: {PIPELINE_INCOMING_DIR}")
     try:
         while True:
-            for f in INCOMING_DIR.iterdir():
-                if f.is_file() and str(f) not in seen:
-                    if f.suffix.lower() in ALLOWED_EXTENSIONS:
-                        seen.add(str(f))
-                        t = threading.Thread(target=queue_file_for_batch, args=(f,), daemon=True)
-                        t.start()
+            for d in poll_dirs:
+                for f in d.iterdir():
+                    if f.is_file() and str(f) not in seen:
+                        if f.suffix.lower() in ALLOWED_EXTENSIONS:
+                            seen.add(str(f))
+                            t = threading.Thread(target=queue_file_for_batch, args=(f,), daemon=True)
+                            t.start()
             time.sleep(3)
     except KeyboardInterrupt:
         log.info("OpenClaw stopped by operator")
@@ -738,6 +897,8 @@ def main():
     log.info(f"Project root : {PROJECT_ROOT}")
     log.info(f"Env file     : {env_file} ({'found' if env_file.is_file() else 'missing'})")
     log.info(f"Incoming     : {INCOMING_DIR}")
+    if PIPELINE_INCOMING_DIR is not None:
+        log.info(f"Pipeline in  : {PIPELINE_INCOMING_DIR}")
     if not (os.environ.get("OPENCLAW_INCOMING_DIR") or "").strip():
         log.warning(
             "OPENCLAW_INCOMING_DIR is not set — using repo incoming/ folder. "
@@ -751,7 +912,22 @@ def main():
     log.info(f"Processed    : {PROCESSED_DIR}")
     log.info(f"Failed       : {FAILED_DIR}")
     log.info(f"Backend      : {BACKEND_URL}")
-    log.info(f"Batch mode   : {BATCH_KEY_MODE} (vessel/global)")
+    log.info(
+        "Batch mode   : %s (vessel=split by vessel id; global=one combined batch per quiet window per source)",
+        BATCH_KEY_MODE,
+    )
+    log.info(
+        "Batch vessel id: %s (unique=hull1/pipeline2 per batch; global=OPENCLAW_GLOBAL_VESSEL_ID)",
+        BATCH_VESSEL_MODE,
+    )
+    log.info(
+        "Inspection source tag: %s (auto infers hull/pipeline from folder path)",
+        DEFAULT_INSPECTION_SOURCE,
+    )
+    log.info(
+        "Post-inspection file handling: %s",
+        "delete from incoming folder" if DELETE_AFTER_INSPECTION else "move to processed/failed folders",
+    )
     log.info(f"Notify success messages from watcher: {'on' if WATCHER_NOTIFY_SUCCESS else 'off'}")
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         log.info("Telegram alerts: enabled (startup/stop and pipeline notices)")
@@ -775,6 +951,8 @@ def main():
 
     # Step 2 — Create folders
     INCOMING_DIR.mkdir(exist_ok=True)
+    if PIPELINE_INCOMING_DIR is not None:
+        PIPELINE_INCOMING_DIR.mkdir(exist_ok=True)
     PROCESSED_DIR.mkdir(exist_ok=True)
     FAILED_DIR.mkdir(exist_ok=True)
     log.info("Folders ready")

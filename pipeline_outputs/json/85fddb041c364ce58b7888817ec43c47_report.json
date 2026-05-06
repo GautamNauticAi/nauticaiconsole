@@ -1,0 +1,17 @@
+{
+  "image": "85fddb041c364ce58b7888817ec43c47.jpg",
+  "image_path": "temp_uploads\\85fddb041c364ce58b7888817ec43c47.jpg",
+  "image_width": 640,
+  "image_height": 640,
+  "image_area_pixels": 409600,
+  "num_detections": 0,
+  "total_fouling_pixels": 0,
+  "coverage_percent": 0.0,
+  "severity": "Low",
+  "annotated_path": "C:\\Users\\chara\\Documents\\NauticAi_Frontend\\NautiCAI\\pipeline_outputs\\annotated\\85fddb041c364ce58b7888817ec43c47_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [],
+  "engine": "aishwarya_yolov8_nauticai",
+  "model_path": "C:\\Users\\chara\\Documents\\NauticAi_Frontend\\NautiCAI\\AgenticAI_Backend\\NautiCAI AI\\NautiCAI_Backend\\aishwarya_models\\best_subpipemini.pt"
+}

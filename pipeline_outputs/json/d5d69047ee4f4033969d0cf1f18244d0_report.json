@@ -1,0 +1,56 @@
+{
+  "image": "d5d69047ee4f4033969d0cf1f18244d0.jpg",
+  "image_path": "temp_uploads\\d5d69047ee4f4033969d0cf1f18244d0.jpg",
+  "image_width": 640,
+  "image_height": 640,
+  "image_area_pixels": 409600,
+  "num_detections": 2,
+  "total_fouling_pixels": 16165,
+  "coverage_percent": 3.9465,
+  "severity": "Low",
+  "annotated_path": "C:\\Users\\chara\\Documents\\NauticAi_Frontend\\NautiCAI\\pipeline_outputs\\annotated\\d5d69047ee4f4033969d0cf1f18244d0_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "object",
+      "raw_class_name": "object",
+      "severity": "Medium",
+      "confidence": 0.5751758813858032,
+      "bbox_xyxy": [
+        148,
+        194,
+        201,
+        351
+      ],
+      "bbox_area_pixels": 8321,
+      "mask_pixels": 8321,
+      "coverage_percent_of_image": 2.0315,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null
+    },
+    {
+      "id": 1,
+      "class_name": "object",
+      "raw_class_name": "object",
+      "severity": "Medium",
+      "confidence": 0.34001168608665466,
+      "bbox_xyxy": [
+        295,
+        534,
+        369,
+        640
+      ],
+      "bbox_area_pixels": 7844,
+      "mask_pixels": 7844,
+      "coverage_percent_of_image": 1.915,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null
+    }
+  ],
+  "engine": "aishwarya_yolov8_nauticai",
+  "model_path": "C:\\Users\\chara\\Documents\\NauticAi_Frontend\\NautiCAI\\AgenticAI_Backend\\NautiCAI AI\\NautiCAI_Backend\\aishwarya_models\\best_subpipemini.pt"
+}
