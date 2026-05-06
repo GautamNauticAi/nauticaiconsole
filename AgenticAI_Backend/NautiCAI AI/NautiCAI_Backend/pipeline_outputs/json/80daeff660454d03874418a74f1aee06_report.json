@@ -1,0 +1,55 @@
+{
+  "image": "80daeff660454d03874418a74f1aee06.jpg",
+  "image_path": "temp_uploads\\80daeff660454d03874418a74f1aee06.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 2,
+  "total_fouling_pixels": 180336,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\80daeff660454d03874418a74f1aee06_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9496999979019165,
+      "bbox_xyxy": [
+        0,
+        0,
+        312,
+        266
+      ],
+      "bbox_area_pixels": 82992,
+      "mask_pixels": 82992,
+      "coverage_percent_of_image": 85.2564,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.8149
+    },
+    {
+      "id": 1,
+      "class_name": "corrosion",
+      "confidence": 0.5658000111579895,
+      "bbox_xyxy": [
+        0,
+        0,
+        312,
+        312
+      ],
+      "bbox_area_pixels": 97344,
+      "mask_pixels": 97344,
+      "coverage_percent_of_image": 100.0,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

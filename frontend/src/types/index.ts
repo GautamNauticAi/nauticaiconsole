@@ -56,6 +56,12 @@ export interface Inspection {
   total_hull_coverage_percentage?: number | null;
   /** From Agentic: number of images in this inspection (1 = single). */
   image_count?: number | null;
+  /** AI vision: detection count (hull / pipeline batch aggregate or single image). */
+  total_detections?: number | null;
+  /** AI vision severity label: Low / Medium / High. */
+  vision_severity?: string | null;
+  /** hull | pipeline when batch/OpenClaw tagged the run. */
+  inspection_source?: string | null;
   /** Frontend-enriched NDT: location id used during inspect. */
   ndt_location_id?: string | null;
   /** Frontend-enriched NDT: initial shell thickness in mm. */
@@ -121,6 +127,8 @@ export interface AgenticInspectResponse {
     vessel_id: string;
     inspection_timestamp: string;
     system_status: string;
+    inspection_source?: string | null;
+    vision_engine?: string | null;
   };
   ai_vision_metrics: {
     total_hull_coverage_percentage: number;
@@ -148,4 +156,14 @@ export interface AgenticVessel {
   requires_cleaning: boolean;
   /** Number of images in this inspection (1 = single, 2+ = multi-image). */
   image_count?: number;
+  inspection_source?: string | null;
+  /** Human label for tables, e.g. "Hull · hull3" */
+  display_name?: string | null;
+  total_detections?: number;
+  vision_severity?: string | null;
+  total_hull_coverage_percentage?: number;
+  /** 1–10 style score for list sorting / Risk column */
+  risk_score?: number;
+  /** HIGH | MEDIUM | LOW */
+  risk_level?: string;
 }

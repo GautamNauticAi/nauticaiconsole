@@ -1,0 +1,74 @@
+{
+  "image": "cbc03510156c4df8b665bd4bbe49b9cb.jpg",
+  "image_path": "temp_uploads\\cbc03510156c4df8b665bd4bbe49b9cb.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 3,
+  "total_fouling_pixels": 138243,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\cbc03510156c4df8b665bd4bbe49b9cb_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9280999898910522,
+      "bbox_xyxy": [
+        100,
+        0,
+        311,
+        273
+      ],
+      "bbox_area_pixels": 57603,
+      "mask_pixels": 57603,
+      "coverage_percent_of_image": 59.1747,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.5945
+    },
+    {
+      "id": 1,
+      "class_name": "biofouling",
+      "confidence": 0.8822000026702881,
+      "bbox_xyxy": [
+        0,
+        0,
+        78,
+        312
+      ],
+      "bbox_area_pixels": 24336,
+      "mask_pixels": 24336,
+      "coverage_percent_of_image": 25.0,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "algae",
+      "species_confidence": 0.9986
+    },
+    {
+      "id": 2,
+      "class_name": "debris",
+      "confidence": 0.40549999475479126,
+      "bbox_xyxy": [
+        107,
+        0,
+        311,
+        276
+      ],
+      "bbox_area_pixels": 56304,
+      "mask_pixels": 56304,
+      "coverage_percent_of_image": 57.8402,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

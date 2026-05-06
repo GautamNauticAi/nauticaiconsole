@@ -1,0 +1,55 @@
+{
+  "image": "d4caeaad3d104bf7ab5fe2f85e97b9d2.jpg",
+  "image_path": "temp_uploads\\d4caeaad3d104bf7ab5fe2f85e97b9d2.jpg",
+  "image_width": 224,
+  "image_height": 224,
+  "image_area_pixels": 50176,
+  "num_detections": 2,
+  "total_fouling_pixels": 100128,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\d4caeaad3d104bf7ab5fe2f85e97b9d2_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "corrosion",
+      "confidence": 0.9020000100135803,
+      "bbox_xyxy": [
+        0,
+        0,
+        224,
+        224
+      ],
+      "bbox_area_pixels": 50176,
+      "mask_pixels": 50176,
+      "coverage_percent_of_image": 100.0,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    },
+    {
+      "id": 1,
+      "class_name": "biofouling",
+      "confidence": 0.20350000262260437,
+      "bbox_xyxy": [
+        0,
+        0,
+        223,
+        224
+      ],
+      "bbox_area_pixels": 49952,
+      "mask_pixels": 49952,
+      "coverage_percent_of_image": 99.5536,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "algae",
+      "species_confidence": 0.9977
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

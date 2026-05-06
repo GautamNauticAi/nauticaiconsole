@@ -46,13 +46,20 @@ from typing import List, Optional, Tuple
 
 
 def _discover_dotenv_paths() -> list[Path]:
-    """All `.env` files from repo root down to this backend folder (backend wins on duplicate keys)."""
+    """
+    `.env` files from this backend folder up to the NautiCAI repo root only (backend wins on duplicate keys).
+
+    Do not walk past the repo root (directory that contains `openclaw/`) — otherwise a unrelated
+    `C:\\Users\\you\\.env` (e.g. JSON from another tool) breaks python-dotenv and pollutes env.
+    """
     found: list[Path] = []
     p = Path(__file__).resolve().parent
     for _ in range(14):
         candidate = p / ".env"
         if candidate.is_file():
             found.append(candidate)
+        if (p / "openclaw").is_dir():
+            break
         if p.parent == p:
             break
         p = p.parent
@@ -91,7 +98,7 @@ def _load_all_dotenv() -> None:
         from dotenv import load_dotenv
 
         for env_path in paths:
-            load_dotenv(env_path, override=True)
+            load_dotenv(env_path, override=True, encoding="utf-8-sig")
     except ImportError:
         for env_path in paths:
             _apply_minimal_env_file(env_path)
@@ -114,7 +121,7 @@ try:
     import jwt as pyjwt
 except ImportError:
     pyjwt = None
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -126,6 +133,28 @@ try:
     import telegram_notify
 except ImportError:
     telegram_notify = None
+
+
+def _http_inspection_telegram_notify_enabled(request: Request) -> bool:
+    """
+    POST /api/inspect* can push summary+PDF to TELEGRAM_CHAT_ID (telegram_notify).
+    Default: only when OpenClaw (or any trusted client) sends X-NauticAI-Client: openclaw,
+    so manual web uploads do not notify the superintendent chat.
+
+    NAUTICAI_TELEGRAM_NOTIFY_HTTP_INSPECT:
+      openclaw (default) — notify only if header X-NauticAI-Client: openclaw
+      off / 0 / false    — never notify from HTTP inspect
+      all / on / 1       — always notify (legacy: manual + automation)
+    """
+    if telegram_notify is None:
+        return False
+    raw = (os.environ.get("NAUTICAI_TELEGRAM_NOTIFY_HTTP_INSPECT") or "openclaw").strip().lower()
+    if raw in ("0", "false", "off", "never", "no"):
+        return False
+    if raw in ("1", "true", "on", "yes", "all", "always"):
+        return True
+    return request.headers.get("x-nauticai-client", "").strip().lower() == "openclaw"
+
 
 # Optional Neon DB for Telegram bot user validation and auth (signup/login)
 POSTGRES_DSN = (os.environ.get("POSTGRES_DSN") or os.environ.get("DATABASE_URL") or "").strip()
@@ -233,13 +262,29 @@ def _get_user_from_token(token: str) -> Optional[dict]:
             conn.close()
 
 def _require_auth(authorization: Optional[str]) -> dict:
+    """
+    Production: Bearer token must exist in auth_sessions (see _get_user_from_token).
+    Local/dev: set NAUTICAI_SKIP_AUTH=1 (in any loaded .env) to bypass DB token lookup.
+    Optional NAUTICAI_SKIP_AUTH_USER_ID — DB user id for reports/inserts (default 1).
+    """
+    if (os.environ.get("NAUTICAI_SKIP_AUTH") or "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            uid = int((os.environ.get("NAUTICAI_SKIP_AUTH_USER_ID") or "1").strip() or "1")
+        except ValueError:
+            uid = 1
+        return {
+            "id": uid,
+            "email": (os.environ.get("NAUTICAI_SKIP_AUTH_EMAIL") or "dev@local").strip() or "dev@local",
+            "telegram_user_id": None,
+            "username": (os.environ.get("NAUTICAI_SKIP_AUTH_USERNAME") or "dev").strip() or "dev",
+        }
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     token = authorization.split(" ", 1)[1].strip()
     user = _get_user_from_token(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired auth token")
-    return user
+    return dict(user)
 
 def _create_reset_token(user_id: int) -> str:
     if not pyjwt:
@@ -372,17 +417,24 @@ app.add_middleware(
 @app.on_event("startup")
 async def load_models():
     print("[NautiCAI] Loading AI models...")
-    vision_pipeline.load_models(
-        yolo_path=os.path.join(
-            os.path.dirname(__file__),
-            "biofouling_best.pt"
-        ),
-        sam_path=os.path.join(
-            os.path.dirname(__file__),
-            "sam_checkpoints",
-            "sam_vit_b_01ec64.pth"
+    if vision_pipeline.should_preload_agentic():
+        vision_pipeline.load_models(
+            yolo_path=os.path.join(
+                os.path.dirname(__file__),
+                "biofouling_best.pt"
+            ),
+            sam_path=os.path.join(
+                os.path.dirname(__file__),
+                "sam_checkpoints",
+                "sam_vit_b_01ec64.pth"
+            )
         )
-    )
+        print("[NautiCAI] Agentic YOLO+SAM preloaded (needed for one or more sources).")
+    else:
+        print(
+            "[NautiCAI] Agentic preload skipped (no routed source currently uses agentic). "
+            "Prasad/Aishwarya models load on first request."
+        )
     print("[NautiCAI] AI models loaded successfully!")
 
 # ==========================================
@@ -581,10 +633,18 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
     pdf.info_row("Inspection Type", "Automated Underwater Hull Assessment (Multi-Image)")
     pdf.info_row("Total Images in This Report", str(n), highlight=True)
     pdf.info_row("Report Status", "COMPLETED - Audit Trail Generated", highlight=True)
+    vision_engine = None
+    if report_payloads:
+        meta0 = report_payloads[0].get("metadata") or {}
+        vision_engine = meta0.get("vision_engine")
+    if vision_engine:
+        pdf.info_row("Vision engine", _pdf_safe(str(vision_engine)), highlight=True)
     pdf.ln(8)
 
     # One section per image
     for idx, report_payload in enumerate(report_payloads):
+        if idx > 0:
+            pdf.add_page()
         timestamp = report_payload["metadata"]["inspection_timestamp"]
         coverage = report_payload["ai_vision_metrics"]["total_hull_coverage_percentage"]
         severity = report_payload["ai_vision_metrics"]["severity"]
@@ -619,8 +679,14 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
                 pdf.set_font('Arial', '', 9)
                 pdf.set_text_color(80, 80, 80)
                 cap = f"  Inspection frame — Image {idx + 1} of {n}"
+                meta_i = report_payload.get("metadata") or {}
+                is_pipeline = (meta_i.get("inspection_source") or "").strip().lower() == "pipeline"
                 if detections == 0:
-                    cap += " (no fouling detected; hull preview)"
+                    cap += (
+                        " (no defects detected; inspection preview)"
+                        if is_pipeline
+                        else " (no fouling detected; hull preview)"
+                    )
                 else:
                     cap += " (annotated)"
                 pdf.cell(0, 6, _pdf_safe(cap), 0, 1, 'L')
@@ -630,7 +696,8 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
             except Exception:
                 pass
 
-    # Overall compliance declaration
+    # Overall compliance declaration (own page so it never stacks under a tall image)
+    pdf.add_page()
     pdf.section_title("3. COMPLIANCE DECLARATION")
     pdf.set_font('Arial', 'I', 10)
     pdf.set_text_color(80, 80, 80)
@@ -1049,9 +1116,17 @@ def _is_video_path(path: str) -> bool:
     return Path(path).suffix.lower() in _VIDEO_EXT
 
 
-def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, reports_folder: str) -> Tuple[dict, Optional[str]]:
+def _process_one_image(
+    temp_image_path: str,
+    vessel_id: str,
+    image_index: int,
+    reports_folder: str,
+    inspection_source: Optional[str] = None,
+) -> Tuple[dict, Optional[str]]:
     """Run vision pipeline on one image; save per-image JSON and annotated image. Returns (report_payload, dest_annotated_path)."""
-    vision_report = vision_pipeline.process_image(temp_image_path)
+    vision_report = vision_pipeline.process_image(
+        temp_image_path, inspection_source=inspection_source
+    )
     coverage = vision_report["coverage_percent"]
     severity = vision_report["severity"]
     detections = vision_report["detections"]
@@ -1061,7 +1136,9 @@ def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, r
         "metadata": {
             "vessel_id": vessel_id,
             "inspection_timestamp": ts,
-            "system_status": "COMPLETED"
+            "system_status": "COMPLETED",
+            "inspection_source": (inspection_source or "").strip() or None,
+            "vision_engine": vision_report.get("engine") or "agentic_yolo_sam",
         },
         "ai_vision_metrics": {
             "total_hull_coverage_percentage": coverage,
@@ -1110,7 +1187,9 @@ def _process_one_image(temp_image_path: str, vessel_id: str, image_index: int, r
 # Batch inspection: all images in one request so one Cloud Run instance has all files (fixes 404 annotated + wrong PDF).
 @app.post("/api/inspect/batch")
 async def run_inspection_batch(
+    request: Request,
     vessel_id: str = Form(..., description="Vessel identifier"),
+    inspection_source: Optional[str] = Form(None, description="Source folder tag (e.g. hull, pipeline)"),
     images: List[UploadFile] = File(..., description="One or more hull images"),
     authorization: Optional[str] = Header(None),
 ):
@@ -1137,7 +1216,9 @@ async def run_inspection_batch(
                     frame_paths = vision_pipeline.extract_video_frame_paths(temp_image_path)
                     try:
                         for fp in frame_paths:
-                            payload, ann_path = _process_one_image(fp, vessel_id, idx, reports_folder)
+                            payload, ann_path = _process_one_image(
+                                fp, vessel_id, idx, reports_folder, inspection_source=inspection_source
+                            )
                             report_payloads.append(payload)
                             annotated_paths.append(ann_path)
                             idx += 1
@@ -1149,7 +1230,9 @@ async def run_inspection_batch(
                                 os.remove(fp)
                         raise
                 else:
-                    payload, ann_path = _process_one_image(temp_image_path, vessel_id, idx, reports_folder)
+                    payload, ann_path = _process_one_image(
+                        temp_image_path, vessel_id, idx, reports_folder, inspection_source=inspection_source
+                    )
                     report_payloads.append(payload)
                     annotated_paths.append(ann_path)
                     idx += 1
@@ -1175,7 +1258,7 @@ async def run_inspection_batch(
                 conn.close()
             except Exception as db_e:
                 print(f"Inspections insert warning: {db_e}")
-        if telegram_notify:
+        if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
                 telegram_notify.send_inspection_result(vessel_id, report_payloads, pdf_path)
@@ -1194,8 +1277,10 @@ async def run_inspection_batch(
 # Main inspection endpoint (single image; for backward compat)
 @app.post("/api/inspect")
 async def run_inspection(
+    request: Request,
     vessel_id: str = Form(..., description="Vessel identifier"),
     image: UploadFile = File(...),
+    inspection_source: Optional[str] = Form(None, description="Source folder tag (e.g. hull, pipeline)"),
     image_index: int = Form(0, description="Index of image in batch (0, 1, 2, ...) for multi-image inspection"),
     authorization: Optional[str] = Header(None),
 ):
@@ -1221,13 +1306,13 @@ async def run_inspection(
                 frame_paths = vision_pipeline.extract_video_frame_paths(temp_image_path)
                 for i, fp in enumerate(frame_paths):
                     payload, ann_path = _process_one_image(
-                        fp, vessel_id, image_index + i, reports_folder
+                        fp, vessel_id, image_index + i, reports_folder, inspection_source=inspection_source
                     )
                     report_payloads.append(payload)
                     annotated_paths.append(ann_path)
             else:
                 payload, ann_path = _process_one_image(
-                    temp_image_path, vessel_id, image_index, reports_folder
+                    temp_image_path, vessel_id, image_index, reports_folder, inspection_source=inspection_source
                 )
                 report_payloads.append(payload)
                 annotated_paths.append(ann_path)
@@ -1265,7 +1350,7 @@ async def run_inspection(
             except Exception as db_e:
                 print(f"Inspections insert warning: {db_e}")
 
-        if telegram_notify:
+        if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
                 telegram_notify.send_inspection_result(
@@ -1408,10 +1493,188 @@ def _invalidate_vessels_cache(user_id: int) -> None:
     _vessels_cache.pop(user_id, None)
 
 
+def _json_paths_for_vessel(reports_folder: str, vessel_id: str) -> list[str]:
+    """Per-image batch files *_inspection_data_0.json …; else single *_inspection_data.json."""
+    if not os.path.isdir(reports_folder):
+        return []
+    prefix = f"{vessel_id}_inspection_data_"
+    numbered: list[tuple[int, str]] = []
+    for name in os.listdir(reports_folder):
+        if not name.endswith(".json") or not name.startswith(prefix):
+            continue
+        mid = name[len(prefix) : -5]
+        if mid.isdigit():
+            numbered.append((int(mid), os.path.join(reports_folder, name)))
+    if numbered:
+        return [p for _, p in sorted(numbered)]
+    bare = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
+    if os.path.isfile(bare):
+        return [bare]
+    return []
+
+
+def _aggregate_inspection_payloads(partials: list[dict]) -> Optional[dict]:
+    """Merge multi-image batch JSONs: sum detections, max severity, max coverage %, any requires_cleaning."""
+    if not partials:
+        return None
+    if len(partials) == 1:
+        return partials[0]
+    order = {"Low": 0, "Medium": 1, "High": 2}
+    total_detections = 0
+    covs: list[float] = []
+    sev = "Low"
+    requires = False
+    timestamps: list[str] = []
+    for p in partials:
+        m = p.get("ai_vision_metrics") or {}
+        total_detections += int(m.get("total_detections") or 0)
+        covs.append(float(m.get("total_hull_coverage_percentage") or 0))
+        s = str(m.get("severity") or "Low")
+        if order.get(s, 0) > order.get(sev, 0):
+            sev = s
+        comp = p.get("compliance_result") or {}
+        if bool(comp.get("requires_cleaning")):
+            requires = True
+        meta = p.get("metadata") or {}
+        ts = meta.get("inspection_timestamp")
+        if ts:
+            timestamps.append(str(ts))
+    max_cov = max(covs) if covs else 0.0
+    last = partials[-1]
+    meta = dict(last.get("metadata") or {})
+    if timestamps:
+        meta["inspection_timestamp"] = max(timestamps)
+    comp = dict(last.get("compliance_result") or {})
+    comp["requires_cleaning"] = requires
+    m = dict(last.get("ai_vision_metrics") or {})
+    m["total_detections"] = total_detections
+    m["total_hull_coverage_percentage"] = max_cov
+    m["severity"] = sev
+    return {"metadata": meta, "ai_vision_metrics": m, "compliance_result": comp}
+
+
+def _load_inspection_data_from_paths(paths: list[str]) -> Optional[dict]:
+    partials: list[dict] = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                partials.append(json.load(f))
+        except Exception as e:
+            print(f"load inspection json {path}: {e}")
+    return _aggregate_inspection_payloads(partials) if partials else None
+
+
+def _load_inspection_data_for_vessel_list(reports_folder: str, vessel_id: str) -> Optional[dict]:
+    return _load_inspection_data_from_paths(_json_paths_for_vessel(reports_folder, vessel_id))
+
+
+def _list_risk_from_inspection_data(data: dict) -> tuple[float, str]:
+    """Numeric risk (1–10 scale) + coarse level for vessel list (matches frontend heuristics)."""
+    comp = data.get("compliance_result") or {}
+    metrics = data.get("ai_vision_metrics") or {}
+    cov = float(metrics.get("total_hull_coverage_percentage") or 0)
+    sev = str(metrics.get("severity") or "Low")
+    if comp.get("requires_cleaning"):
+        return 8.5, "HIGH"
+    if sev == "High" or cov >= 15:
+        return round(min(8.2, 6.0 + cov / 45.0), 2), "HIGH"
+    if sev == "Medium" or cov >= 5:
+        return round(min(7.0, 4.5 + cov / 40.0), 2), "MEDIUM"
+    return round(max(1.0, min(4.0, 1.5 + cov / 12.0)), 2), "LOW"
+
+
+def _vessel_row_from_inspection_json(
+    vessel_id: str, last_inspection: str, image_count: int, data: Optional[dict]
+) -> dict:
+    """Shape one row for GET /api/vessels/all (Dashboard + Reports)."""
+    if not data:
+        return {
+            "vessel_id": vessel_id,
+            "last_inspection": last_inspection,
+            "imo_rating": "—",
+            "requires_cleaning": False,
+            "image_count": image_count or 1,
+            "inspection_source": None,
+            "display_name": vessel_id,
+            "total_detections": 0,
+            "vision_severity": None,
+            "total_hull_coverage_percentage": None,
+            "risk_score": 1.0,
+            "risk_level": "LOW",
+        }
+    meta = data.get("metadata") or {}
+    metrics = data.get("ai_vision_metrics") or {}
+    comp = data.get("compliance_result") or {}
+    src_raw = (meta.get("inspection_source") or "").strip().lower()
+    src = src_raw or None
+    if src == "pipeline":
+        display_name = f"Pipeline · {vessel_id}"
+    elif src == "hull":
+        display_name = f"Hull · {vessel_id}"
+    else:
+        display_name = vessel_id
+    total_dets = int(metrics.get("total_detections") or 0)
+    vis_sev = str(metrics.get("severity") or "Low")
+    cov_pct = float(metrics.get("total_hull_coverage_percentage") or 0)
+    rscore, rlevel = _list_risk_from_inspection_data(data)
+    return {
+        "vessel_id": vessel_id,
+        "last_inspection": last_inspection,
+        "imo_rating": comp.get("official_imo_rating", "—"),
+        "requires_cleaning": bool(comp.get("requires_cleaning")),
+        "image_count": image_count or 1,
+        "inspection_source": src,
+        "display_name": display_name,
+        "total_detections": total_dets,
+        "vision_severity": vis_sev,
+        "total_hull_coverage_percentage": cov_pct,
+        "risk_score": rscore,
+        "risk_level": rlevel,
+    }
+
+
+def _vessels_discovered_from_reports_dir(reports_folder: str) -> list[dict]:
+    """Build vessel rows from JSON saved under reports/{user_id}/ (OpenClaw + Inspect)."""
+    vessel_ids: set[str] = set()
+    per_image_count: dict[str, int] = {}
+    if not os.path.isdir(reports_folder):
+        return []
+    for file in os.listdir(reports_folder):
+        if not file.endswith(".json"):
+            continue
+        if file.endswith("_inspection_data.json"):
+            vessel_id = file.replace("_inspection_data.json", "")
+            vessel_ids.add(vessel_id)
+        elif "_inspection_data_" in file and file.endswith(".json"):
+            prefix, rest = file.rsplit("_inspection_data_", 1)
+            if rest.endswith(".json") and rest[:-5].isdigit():
+                vessel_id = prefix
+                vessel_ids.add(vessel_id)
+                per_image_count[vessel_id] = per_image_count.get(vessel_id, 0) + 1
+    out: list[dict] = []
+    for vessel_id in sorted(vessel_ids):
+        paths = _json_paths_for_vessel(reports_folder, vessel_id)
+        data = _load_inspection_data_from_paths(paths)
+        if not data:
+            continue
+        ic = max(per_image_count.get(vessel_id, 0), len(paths))
+        if ic < 1:
+            ic = 1
+        out.append(
+            _vessel_row_from_inspection_json(
+                vessel_id,
+                str((data.get("metadata") or {}).get("inspection_timestamp", "")),
+                ic,
+                data,
+            )
+        )
+    return out
+
+
 # Get list of all inspected vessels for the authenticated user only
 @app.get("/api/vessels/all")
 async def get_all_vessels(authorization: Optional[str] = Header(None)):
-    """Returns vessels that this user has inspected (from DB + reports/{user_id}/)."""
+    """Returns vessels that this user has inspected (DB rows merged with reports/{user_id}/ on disk)."""
     user = _require_auth(authorization)
     uid = user["id"]
     now_ts = datetime.now().timestamp()
@@ -1419,7 +1682,8 @@ async def get_all_vessels(authorization: Optional[str] = Header(None)):
     if cached and now_ts < cached[0]:
         return JSONResponse(content=cached[1])
     reports_folder = _reports_folder(uid)
-    vessels = []
+    by_id: dict[str, dict] = {}
+
     if POSTGRES_DSN and psycopg2 is not None:
         try:
             conn = psycopg2.connect(POSTGRES_DSN, cursor_factory=RealDictCursor)
@@ -1439,66 +1703,29 @@ async def get_all_vessels(authorization: Optional[str] = Header(None)):
             conn.close()
             for row in rows:
                 vessel_id = row["vessel_id"]
-                main_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
-                fallback_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_0.json")
-                data = None
-                if os.path.isfile(main_path):
-                    with open(main_path, "r") as f:
-                        data = json.load(f)
-                elif os.path.isfile(fallback_path):
-                    with open(fallback_path, "r") as f:
-                        data = json.load(f)
-                imo_rating = data["compliance_result"]["official_imo_rating"] if data else "—"
-                requires_cleaning = data["compliance_result"]["requires_cleaning"] if data else False
+                paths = _json_paths_for_vessel(reports_folder, vessel_id)
+                data = _load_inspection_data_from_paths(paths)
                 ts = row["last_inspection"]
                 last_ts = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts)
-                vessels.append({
-                    "vessel_id": vessel_id,
-                    "last_inspection": last_ts,
-                    "imo_rating": imo_rating,
-                    "requires_cleaning": requires_cleaning,
-                    "image_count": row.get("image_count") or 1,
-                })
-            payload = {"vessels": vessels}
-            _vessels_cache[uid] = (datetime.now().timestamp() + VESSELS_CACHE_TTL_SEC, payload)
-            return JSONResponse(content=payload)
+                db_ic = int(row.get("image_count") or 1)
+                path_ic = len(paths)
+                ic = max(db_ic, path_ic) if path_ic else db_ic
+                by_id[vessel_id] = _vessel_row_from_inspection_json(
+                    vessel_id,
+                    last_ts,
+                    ic,
+                    data,
+                )
         except Exception as e:
             if "does not exist" not in str(e).lower():
                 print(f"get_all_vessels DB: {e}")
-    vessel_ids = set()
-    per_image_count = {}
-    if os.path.exists(reports_folder):
-        for file in os.listdir(reports_folder):
-            if not file.endswith(".json"):
-                continue
-            if file.endswith("_inspection_data.json"):
-                vessel_id = file.replace("_inspection_data.json", "")
-                vessel_ids.add(vessel_id)
-            elif "_inspection_data_" in file and file.endswith(".json"):
-                prefix, rest = file.rsplit("_inspection_data_", 1)
-                if rest.endswith(".json") and rest[:-5].isdigit():
-                    vessel_id = prefix
-                    vessel_ids.add(vessel_id)
-                    per_image_count[vessel_id] = per_image_count.get(vessel_id, 0) + 1
-    for vessel_id in sorted(vessel_ids):
-        main_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
-        fallback_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data_0.json")
-        data = None
-        if os.path.isfile(main_path):
-            with open(main_path, "r") as f:
-                data = json.load(f)
-        elif os.path.isfile(fallback_path):
-            with open(fallback_path, "r") as f:
-                data = json.load(f)
-        if not data:
-            continue
-        vessels.append({
-            "vessel_id": vessel_id,
-            "last_inspection": data["metadata"]["inspection_timestamp"],
-            "imo_rating": data["compliance_result"]["official_imo_rating"],
-            "requires_cleaning": data["compliance_result"]["requires_cleaning"],
-            "image_count": per_image_count.get(vessel_id, 1),
-        })
+
+    for v in _vessels_discovered_from_reports_dir(reports_folder):
+        vid = v.get("vessel_id")
+        if vid and vid not in by_id:
+            by_id[vid] = v
+
+    vessels = sorted(by_id.values(), key=lambda x: str(x.get("last_inspection") or ""), reverse=True)
     payload = {"vessels": vessels}
     _vessels_cache[uid] = (datetime.now().timestamp() + VESSELS_CACHE_TTL_SEC, payload)
     return JSONResponse(content=payload)

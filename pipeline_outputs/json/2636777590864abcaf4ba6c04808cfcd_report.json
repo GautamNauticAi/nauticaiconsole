@@ -1,0 +1,74 @@
+{
+  "image": "2636777590864abcaf4ba6c04808cfcd.jpg",
+  "image_path": "temp_uploads\\2636777590864abcaf4ba6c04808cfcd.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 3,
+  "total_fouling_pixels": 220089,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\2636777590864abcaf4ba6c04808cfcd_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "debris",
+      "confidence": 0.5754,
+      "bbox_xyxy": [
+        2,
+        0,
+        295,
+        161
+      ],
+      "bbox_area_pixels": 47173,
+      "mask_pixels": 47173,
+      "coverage_percent_of_image": 48.4601,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    },
+    {
+      "id": 1,
+      "class_name": "crack",
+      "confidence": 0.5702,
+      "bbox_xyxy": [
+        17,
+        0,
+        264,
+        311
+      ],
+      "bbox_area_pixels": 76817,
+      "mask_pixels": 76817,
+      "coverage_percent_of_image": 78.9129,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    },
+    {
+      "id": 2,
+      "class_name": "corrosion",
+      "confidence": 0.271,
+      "bbox_xyxy": [
+        2,
+        0,
+        311,
+        311
+      ],
+      "bbox_area_pixels": 96099,
+      "mask_pixels": 96099,
+      "coverage_percent_of_image": 98.721,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

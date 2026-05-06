@@ -1,0 +1,55 @@
+{
+  "image": "3c7da49643ed42d282d2c939c9cc7857.jpg",
+  "image_path": "temp_uploads\\3c7da49643ed42d282d2c939c9cc7857.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 2,
+  "total_fouling_pixels": 194064,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\3c7da49643ed42d282d2c939c9cc7857_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9884999990463257,
+      "bbox_xyxy": [
+        0,
+        0,
+        312,
+        312
+      ],
+      "bbox_area_pixels": 97344,
+      "mask_pixels": 97344,
+      "coverage_percent_of_image": 100.0,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.8968
+    },
+    {
+      "id": 1,
+      "class_name": "debris",
+      "confidence": 0.6736999750137329,
+      "bbox_xyxy": [
+        0,
+        0,
+        310,
+        312
+      ],
+      "bbox_area_pixels": 96720,
+      "mask_pixels": 96720,
+      "coverage_percent_of_image": 99.359,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

@@ -48,17 +48,30 @@ export function invalidateInspectionsCache(): void {
 
 /** Map Agentic vessel to Inspection for Dashboard/Reports */
 function vesselToInspection(v: AgenticVessel): Inspection {
+  const label = (v.display_name && v.display_name.trim()) || v.vessel_id;
+  const apiRisk =
+    typeof v.risk_score === "number" && !Number.isNaN(v.risk_score)
+      ? v.risk_score
+      : v.requires_cleaning
+        ? 8.5
+        : 2;
+  const apiLevel = (v.risk_level || (v.requires_cleaning ? "HIGH" : "LOW")) as string;
   return {
     id: v.vessel_id,
     inspection_id: v.vessel_id,
     status: "completed",
     created_at: v.last_inspection,
     file_name: null,
-    vessel_name: v.vessel_id,
+    vessel_name: label,
+    inspection_source: v.inspection_source ?? null,
+    total_detections: typeof v.total_detections === "number" ? v.total_detections : null,
+    vision_severity: v.vision_severity ?? null,
+    total_hull_coverage_percentage:
+      typeof v.total_hull_coverage_percentage === "number" ? v.total_hull_coverage_percentage : null,
     detected_classes: null,
     highest_confidence: null,
-    risk_level: v.requires_cleaning ? "HIGH" : "LOW",
-    risk_score: v.requires_cleaning ? 8 : 3,
+    risk_level: apiLevel,
+    risk_score: apiRisk,
     imo_rating: v.imo_rating,
     requires_cleaning: v.requires_cleaning,
     image_count: v.image_count ?? 1,
@@ -72,17 +85,44 @@ export function agenticResponseToInspection(
   r: AgenticInspectResponse,
   fileName?: string | null
 ): Inspection {
+  const src = (r.metadata.inspection_source || "").trim().toLowerCase() || null;
+  const vesselLabel =
+    src === "pipeline"
+      ? `Pipeline · ${r.metadata.vessel_id}`
+      : src === "hull"
+        ? `Hull · ${r.metadata.vessel_id}`
+        : r.metadata.vessel_id;
+  const cov = r.ai_vision_metrics.total_hull_coverage_percentage;
+  const sev = (r.ai_vision_metrics.severity || "Low").toLowerCase();
+  let listRisk = 2;
+  let listLevel = "LOW";
+  if (r.compliance_result.requires_cleaning) {
+    listRisk = 8.5;
+    listLevel = "HIGH";
+  } else if (sev === "high" || cov >= 15) {
+    listRisk = Math.min(8.2, 6.0 + cov / 45.0);
+    listLevel = "HIGH";
+  } else if (sev === "medium" || cov >= 5) {
+    listRisk = Math.min(7.0, 4.5 + cov / 40.0);
+    listLevel = "MEDIUM";
+  } else {
+    listRisk = Math.max(1.0, Math.min(4.0, 1.5 + cov / 12.0));
+    listLevel = "LOW";
+  }
   return {
     id: r.metadata.vessel_id,
     inspection_id: r.metadata.vessel_id,
     status: "completed",
     created_at: r.metadata.inspection_timestamp,
     file_name: fileName ?? null,
-    vessel_name: r.metadata.vessel_id,
+    vessel_name: vesselLabel,
+    inspection_source: src,
+    total_detections: r.ai_vision_metrics.total_detections,
+    vision_severity: r.ai_vision_metrics.severity,
     detected_classes: null,
     highest_confidence: null,
-    risk_level: r.compliance_result.requires_cleaning ? "HIGH" : "LOW",
-    risk_score: r.compliance_result.requires_cleaning ? 8.5 : 2,
+    risk_level: listLevel,
+    risk_score: Math.round(listRisk * 100) / 100,
     inference_time: null,
     imo_rating: r.compliance_result.official_imo_rating,
     requires_cleaning: r.compliance_result.requires_cleaning,
@@ -130,6 +170,7 @@ export const api = {
     const form = new FormData();
     form.append("vessel_id", vesselId);
     form.append("image", imageFile);
+    form.append("inspection_source", "hull");
 
     const headers = new Headers();
     const auth = getAuthHeaders();
@@ -149,17 +190,22 @@ export const api = {
   /**
    * POST /api/inspect: one report per image, or one per sampled video frame.
    * vesselId defaults to inspection_<timestamp>. imageIndex is the starting index when uploading multiple files in sequence.
+   * inspectionSource defaults to "hull" so routing matches OpenClaw hull jobs (NAUTICAI_HULL_FOLDER_ENGINE); pass "pipeline" only if you add a UI for it.
    */
   async upload(
     file: File,
     vesselName?: string,
     imageIndex?: number,
-    ndtData?: NdtInputData
+    ndtData?: NdtInputData,
+    inspectionSource: string = "hull"
   ): Promise<AgenticInspectResponse[]> {
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     const form = new FormData();
     form.append("vessel_id", vesselId);
     form.append("image", file);
+    if (inspectionSource) {
+      form.append("inspection_source", inspectionSource);
+    }
     if (ndtData?.thickness_mm?.trim()) {
       form.append("ndt_thickness_mm", ndtData.thickness_mm.trim());
     }
@@ -194,12 +240,16 @@ export const api = {
   async uploadBatch(
     files: File[],
     vesselName?: string,
-    ndtData?: NdtInputData
+    ndtData?: NdtInputData,
+    inspectionSource: string = "hull"
   ): Promise<AgenticInspectResponse[]> {
     if (files.length === 0) return [];
     const vesselId = vesselName?.trim() || `inspection_${Date.now()}`;
     const form = new FormData();
     form.append("vessel_id", vesselId);
+    if (inspectionSource) {
+      form.append("inspection_source", inspectionSource);
+    }
     if (ndtData?.thickness_mm?.trim()) {
       form.append("ndt_thickness_mm", ndtData.thickness_mm.trim());
     }

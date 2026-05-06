@@ -1,0 +1,36 @@
+{
+  "image": "bea00d88826e44c1b630b73916c531c0.jpg",
+  "image_path": "temp_uploads\\bea00d88826e44c1b630b73916c531c0.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 1,
+  "total_fouling_pixels": 67580,
+  "coverage_percent": 69.4239,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\bea00d88826e44c1b630b73916c531c0_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "biofouling",
+      "confidence": 0.9344000220298767,
+      "bbox_xyxy": [
+        0,
+        0,
+        218,
+        310
+      ],
+      "bbox_area_pixels": 67580,
+      "mask_pixels": 67580,
+      "coverage_percent_of_image": 69.4239,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": "barnacles",
+      "species_confidence": 0.6372
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

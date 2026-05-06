@@ -33,7 +33,25 @@ function maxSeverity(anomalies: { severity: Severity }[]): Severity | null {
   return null;
 }
 
+/** AI vision returns Low / Medium / High — map to UI severity tokens. */
+function visionSeverityToUi(vision: string | null | undefined): Severity | null {
+  const s = (vision || "").trim().toLowerCase();
+  if (s === "high") return "high";
+  if (s === "medium") return "medium";
+  if (s === "low") return "low";
+  return null;
+}
+
+function tableSeverity(ins: Inspection): Severity | null {
+  const fromAnomalies = maxSeverity(ins.anomalies ?? []);
+  if (fromAnomalies) return fromAnomalies;
+  return visionSeverityToUi(ins.vision_severity);
+}
+
 function anomalyCount(ins: Inspection): number {
+  if (typeof ins.total_detections === "number" && !Number.isNaN(ins.total_detections)) {
+    return ins.total_detections;
+  }
   if (ins.anomalies?.length) return ins.anomalies.length;
   const classes = ins.detected_classes;
   if (Array.isArray(classes)) return classes.length;
@@ -52,6 +70,7 @@ export default function ReportsPage() {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [batchSourceFilter, setBatchSourceFilter] = useState<"all" | "hull" | "pipeline">("all");
   const [sortBy, setSortBy] = useState<"date" | "risk">("date");
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +130,17 @@ export default function ReportsPage() {
   const filtered = inspections
     .filter((i) => {
       if (filterStatus !== "all" && i.status !== filterStatus) return false;
-      if (search && !`${i.vessel_name ?? ""} ${i.file_name ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
+      if (batchSourceFilter !== "all" && (i.inspection_source || "").toLowerCase() !== batchSourceFilter) {
+        return false;
+      }
+      if (
+        search &&
+        !`${i.vessel_name ?? ""} ${i.file_name ?? ""} ${i.inspection_source ?? ""} ${i.inspection_id ?? ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase())
+      ) {
+        return false;
+      }
       return true;
     })
     .sort((a, b) =>
@@ -164,6 +193,7 @@ export default function ReportsPage() {
         <div style={{
           ...CARD_STYLE,
           display: "flex",
+          flexWrap: "wrap",
           gap: 12,
           alignItems: "center",
           marginBottom: 20,
@@ -212,6 +242,29 @@ export default function ReportsPage() {
               {s}
             </button>
           ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Batch:</span>
+            {(["all", "hull", "pipeline"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setBatchSourceFilter(k)}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  border: "1px solid #334155",
+                  cursor: "pointer",
+                  background: batchSourceFilter === k ? "#334155" : "transparent",
+                  color: batchSourceFilter === k ? "#f1f5f9" : "#94a3b8",
+                  textTransform: "capitalize",
+                }}
+              >
+                {k === "all" ? "All" : k}
+              </button>
+            ))}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
             <span style={{ fontSize: 12, color: "#64748b" }}>Sort:</span>
             {(["date", "risk"] as const).map((s) => (
@@ -278,18 +331,26 @@ export default function ReportsPage() {
                   </tr>
                 )}
                 {!loading && filtered.map((ins, i) => {
-                  const ms = maxSeverity(ins.anomalies ?? []);
+                  const ms = tableSeverity(ins);
                   const msColor = ms ? severityColor[ms] : "#64748b";
                   const rowId = ins.inspection_id ?? String(ins.id);
-                  const anyIns = ins as any;
-                  const numericRisk = typeof anyIns.risk_score === "number" ? anyIns.risk_score : anyIns.risk_level === "HIGH" || anyIns.risk_level === "CRITICAL" ? 8.5 : anyIns.risk_level === "MEDIUM" ? 5.5 : anyIns.risk_level === "LOW" ? 3.0 : 1.0;
+                  const numericRisk =
+                    typeof ins.risk_score === "number" && !Number.isNaN(ins.risk_score)
+                      ? ins.risk_score
+                      : ins.risk_level === "HIGH" || ins.risk_level === "CRITICAL"
+                        ? 8.5
+                        : ins.risk_level === "MEDIUM"
+                          ? 5.5
+                          : ins.risk_level === "LOW"
+                            ? 3.0
+                            : 1.0;
                   return (
                     <tr key={rowId} style={{ borderBottom: i < filtered.length - 1 ? "1px solid rgba(129,140,248,0.12)" : "none" }}>
                       <td style={{ padding: "12px 14px", overflow: "hidden", textOverflow: "ellipsis" }}>
                         <span style={{ fontSize: 13, color: "#e2e8f0", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={String(ins.vessel_name ?? ins.inspection_id)}>{ins.vessel_name ?? ins.inspection_id ?? "—"}</span>
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "rgba(191,219,254,0.9)" }}>
-                        {anyIns.image_count ?? 1}
+                        {ins.image_count ?? 1}
                       </td>
                       <td style={{ padding: "12px 14px", fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
                         {new Date(ins.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}

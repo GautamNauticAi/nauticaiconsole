@@ -1,0 +1,36 @@
+{
+  "image": "0acdf4934ed241e4b8943d7d354d6b6f.jpg",
+  "image_path": "temp_uploads\\0acdf4934ed241e4b8943d7d354d6b6f.jpg",
+  "image_width": 640,
+  "image_height": 640,
+  "image_area_pixels": 409600,
+  "num_detections": 1,
+  "total_fouling_pixels": 291739,
+  "coverage_percent": 71.2253,
+  "severity": "High",
+  "annotated_path": "pipeline_outputs\\annotated\\0acdf4934ed241e4b8943d7d354d6b6f_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "debris",
+      "confidence": 0.46709999442100525,
+      "bbox_xyxy": [
+        1,
+        44,
+        498,
+        631
+      ],
+      "bbox_area_pixels": 291739,
+      "mask_pixels": 291739,
+      "coverage_percent_of_image": 71.2253,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}
