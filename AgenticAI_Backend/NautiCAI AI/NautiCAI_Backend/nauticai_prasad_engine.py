@@ -22,8 +22,9 @@ from typing import Any, List, Optional, Tuple
 import cv2
 import numpy as np
 
-# JetPack TensorRT Python bindings call np.bool; NumPy 1.24+ removed it (use np.bool_ / bool).
-if not hasattr(np, "bool"):
+# JetPack TensorRT Python bindings call np.bool; NumPy 1.24+ removed it (avoid hasattr — warns).
+_np_major_minor = tuple(int(x) for x in np.__version__.split(".")[:2])
+if _np_major_minor >= (1, 24):
     np.bool = np.bool_  # type: ignore[attr-defined,misc]
 
 import torch
@@ -45,7 +46,8 @@ from ultralytics import YOLO
 YOLO_CONF = float(os.getenv("YOLO_CONF", "0.25"))
 YOLO_IOU = float(os.getenv("YOLO_IOU", "0.30"))
 MERGE_IOU = float(os.getenv("MERGE_IOU", "0.40"))
-YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "416"))
+# Default 640 matches exported TensorRT engines (fixed IO shape); use YOLO_IMGSZ=416 only if all weights are 416.
+YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "640"))
 
 # --- v2 ONNX stack (MODELS_INTEGRATION_GUIDE.md); separate from legacy YOLO_* ---
 V2_IOU = float(os.getenv("NAUTICAI_PRASAD_ONNX_IOU", "0.40"))
