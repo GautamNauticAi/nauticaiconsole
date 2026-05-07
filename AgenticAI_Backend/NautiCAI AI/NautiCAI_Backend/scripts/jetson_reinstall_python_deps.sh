@@ -52,6 +52,9 @@ fi
 echo "==> Refresh requests + protobuf in venv (shadow distro packages)"
 python -m pip install --upgrade --ignore-installed "requests>=2.28.0" "protobuf>=3.20.2,<6"
 
+echo "==> Fix sys.path so venv wins over /usr/lib/python3/dist-packages"
+python scripts/jetson_ensure_venv_site_first.py
+
 echo "==> Quick import check"
 python -c "import fpdf; from fpdf import FPDF; import cv2, fastapi; print('fpdf, cv2, fastapi: OK')"
 

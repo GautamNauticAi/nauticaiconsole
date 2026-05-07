@@ -85,6 +85,9 @@ fi
 stamp "requests + protobuf into venv (shadow Ubuntu deb copies when using --system-site-packages)"
 python -m pip install --upgrade --ignore-installed "requests>=2.28.0" "protobuf>=3.20.2,<6"
 
+stamp "Ensure venv site-packages sorts before /usr/lib (fixes requests/shadowed pip installs)"
+python scripts/jetson_ensure_venv_site_first.py
+
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.version.cuda)"
 
 echo "==> Done. Start API (example):"
