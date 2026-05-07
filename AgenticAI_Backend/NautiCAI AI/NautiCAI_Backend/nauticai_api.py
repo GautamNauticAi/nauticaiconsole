@@ -40,7 +40,7 @@ import cv2
 import uuid
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -168,6 +168,34 @@ try:
 except ImportError:
     psycopg2 = None
     RealDictCursor = None
+
+
+def _insert_agentic_inspection_row(uid: int, vessel_id: str, ts_utc: datetime, image_count: int) -> None:
+    """Write agentic_inspections row. Skips if users.id is missing (avoids FK noise with SKIP_AUTH default uid)."""
+    if not POSTGRES_DSN or psycopg2 is None:
+        return
+    conn = None
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN)
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM users WHERE id = %s", (uid,))
+            if cur.fetchone() is None:
+                print(
+                    "Inspections DB skip: no row in users for "
+                    f"id={uid}. If using NAUTICAI_SKIP_AUTH, set NAUTICAI_SKIP_AUTH_USER_ID to a real "
+                    "users.id from this database (or create that user via signup)."
+                )
+                return
+            cur.execute(
+                "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
+                (uid, vessel_id, ts_utc, image_count),
+            )
+        conn.commit()
+    except Exception as db_e:
+        print(f"Inspections insert warning: {db_e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _require_postgres_for_auth() -> None:
@@ -1244,20 +1272,8 @@ async def run_inspection_batch(
         else:
             create_pdf(vessel_id, report_payloads[0], reports_folder, annotated_path=annotated_paths[0] if annotated_paths else None)
         _invalidate_vessels_cache(uid)
-        if POSTGRES_DSN and psycopg2 is not None:
-            try:
-                from datetime import timezone
-                ts_utc = datetime.now(timezone.utc)
-                conn = psycopg2.connect(POSTGRES_DSN)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
-                        (uid, vessel_id, ts_utc, len(report_payloads)),
-                    )
-                conn.commit()
-                conn.close()
-            except Exception as db_e:
-                print(f"Inspections insert warning: {db_e}")
+        ts_utc = datetime.now(timezone.utc)
+        _insert_agentic_inspection_row(uid, vessel_id, ts_utc, len(report_payloads))
         if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
@@ -1335,20 +1351,8 @@ async def run_inspection(
 
         _invalidate_vessels_cache(uid)
 
-        if POSTGRES_DSN and psycopg2 is not None:
-            try:
-                from datetime import timezone
-                ts_utc = datetime.now(timezone.utc)
-                conn = psycopg2.connect(POSTGRES_DSN)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "INSERT INTO agentic_inspections (user_id, vessel_id, inspection_timestamp, image_count) VALUES (%s, %s, %s, %s)",
-                        (uid, vessel_id, ts_utc, len(report_payloads)),
-                    )
-                conn.commit()
-                conn.close()
-            except Exception as db_e:
-                print(f"Inspections insert warning: {db_e}")
+        ts_utc = datetime.now(timezone.utc)
+        _insert_agentic_inspection_row(uid, vessel_id, ts_utc, len(report_payloads))
 
         if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
