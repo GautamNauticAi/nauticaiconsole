@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Re-install API + vision Python packages on Jetson WITHOUT touching NVIDIA torch/torchvision.
+# Goal: make `python nauticai_api.py` imports work on the Jetson (FastAPI, CV, ONNX, Ultralytics).
+# Re-install API + vision Python packages WITHOUT touching NVIDIA torch/torchvision.
 # Use when you see: ModuleNotFoundError: No module named 'fpdf' (or fastapi, cv2, etc.)
 # after days away, a new shell, or forgetting to activate the venv.
 #
@@ -45,7 +46,14 @@ else
   python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 fi
 
+# .venv often uses --system-site-packages (for TensorRT). Pip then compares deps against old
+# Ubuntu deb versions (requests 2.22, protobuf 3.6) and prints scary ERROR lines even after
+# installing newer wheels into the venv. Force venv copies so runtime matches pip metadata.
+echo "==> Refresh requests + protobuf in venv (shadow distro packages)"
+python -m pip install --upgrade --ignore-installed "requests>=2.28.0" "protobuf>=3.20.2,<6"
+
 echo "==> Quick import check"
 python -c "import fpdf; from fpdf import FPDF; import cv2, fastapi; print('fpdf, cv2, fastapi: OK')"
 
-echo "==> Done. Start API: ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS=1 PYTHONNOUSERSITE=1 python nauticai_api.py"
+echo "==> Done. Pip may still warn about polars/torch vs torchvision — expected on JP5; use env below."
+echo "==> Start API: ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS=1 PYTHONNOUSERSITE=1 python nauticai_api.py"
