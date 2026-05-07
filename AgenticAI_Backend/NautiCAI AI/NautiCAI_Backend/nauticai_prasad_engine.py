@@ -21,6 +21,11 @@ from typing import Any, List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+# JetPack TensorRT Python bindings call np.bool; NumPy 1.24+ removed it (use np.bool_ / bool).
+if not hasattr(np, "bool"):
+    np.bool = np.bool_  # type: ignore[attr-defined,misc]
+
 import torch
 
 # Torch checkpoints (Ultralytics / full ckpt) need weights_only=False on newer PyTorch.
