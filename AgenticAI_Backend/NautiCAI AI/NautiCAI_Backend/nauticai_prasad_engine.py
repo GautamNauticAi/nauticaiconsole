@@ -189,7 +189,14 @@ def _load_yolo_path(path: str, label: str) -> Optional[YOLO]:
             except Exception:
                 pass
         names = list(m.names.values()) if getattr(m, "names", None) else []
-        print(f"[Prasad engine] {label} loaded — classes={names}")
+        nc = len(names)
+        if nc <= 16:
+            print(f"[Prasad engine] {label} loaded — classes ({nc})={names}")
+        else:
+            print(
+                f"[Prasad engine] {label} loaded — class_count={nc}, preview={names[:4]} … "
+                "(long generic lists are normal for some .engine exports without embedded names)"
+            )
         return m
     except Exception as e:
         print(f"[Prasad engine] WARN {label} ({path}): {e}")
