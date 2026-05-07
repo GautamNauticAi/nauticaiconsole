@@ -106,6 +106,29 @@ def _load_all_dotenv() -> None:
 
 _load_all_dotenv()
 
+
+def _is_l4t_jetson() -> bool:
+    """True on NVIDIA Jetson / L4T (used for safe Ultralytics defaults)."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        if os.path.isfile("/etc/nv_tegra_release"):
+            return True
+        model_path = "/proc/device-tree/model"
+        if os.path.isfile(model_path):
+            with open(model_path, "rb") as f:
+                model = f.read().decode("utf-8", errors="ignore").lower()
+            return "jetson" in model or "tegra" in model
+    except OSError:
+        pass
+    return False
+
+
+# Skip Ultralytics' runtime pip dependency checks on Jetson (NVIDIA torch ≠ PyPI metadata).
+# If unset on L4T, apply default here so you do not need `export ...` every new shell.
+if _is_l4t_jetson():
+    os.environ.setdefault("ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS", "1")
+
 try:
     from fpdf import FPDF
 except ImportError as _e:
