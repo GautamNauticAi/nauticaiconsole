@@ -55,11 +55,32 @@ python -m pip install --no-cache-dir "${NV_TORCH_URL}"
 stamp "Installing torchvision (${TORCHVISION_SPEC}) — --no-deps keeps NVIDIA torch"
 python -m pip install "${TORCHVISION_SPEC}" --no-deps
 
-stamp "Polars (binary wheel only — never sdist on Jetson; avoids puccinialin / ultralytics#22017)"
-python -m pip install --only-binary=:all: "polars>=1.8.2,<3"
-
+ARCH="$(uname -m)"
 stamp "Installing requirements.jetson.txt (includes git clone of segment-anything — can be slow)..."
-python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
+if [[ "${ARCH}" == aarch64 ]] && [[ "${PY_TAG}" == cp38 ]]; then
+  # Polars >=0.20 wheels are manylinux_2_24_aarch64; JP5 pip stacks often reject those tags, so
+  # only polars<=0.19.x (manylinux2014_aarch64) appears as compatible under --only-binary.
+  # Ultralytics declares polars>=0.20 but runs on 0.19.x for inference paths we use; install it --no-deps.
+  stamp "aarch64 + Python 3.8: polars==0.19.12 (manylinux2014) + ultralytics --no-deps + runtime libs"
+  REQ_NO_ULTRA="$(mktemp)"
+  awk '!/^ultralytics==/' requirements.jetson.txt > "${REQ_NO_ULTRA}"
+  python -m pip install --only-binary=:all: "polars==0.19.12"
+  python -m pip install -r "${REQ_NO_ULTRA}"
+  rm -f "${REQ_NO_ULTRA}"
+  python -m pip install "ultralytics==8.4.47" --no-deps
+  python -m pip install \
+    "matplotlib>=3.3.0" \
+    "pillow>=7.1.2" \
+    "pyyaml>=5.3.1" \
+    "scipy>=1.4.1" \
+    "psutil>=5.8.0" \
+    "ultralytics-thop>=2.0.18"
+else
+  stamp "Polars manylinux_2_24 wheel + full requirements (constraints file optional)"
+  python -m pip install --only-binary=:all: "polars>=1.8.2,<3" \
+    || python -m pip install --only-binary=:all: "polars==1.8.2"
+  python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
+fi
 
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.version.cuda)"
 

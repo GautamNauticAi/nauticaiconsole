@@ -1,10 +1,7 @@
 # Jetson / aarch64 + Python 3.8 — use ONLY on edge devices (not Windows).
 #
-# Install (from this folder):
-#   export PYTHONNOUSERSITE=1
-#   python -m pip install -U pip setuptools wheel
-#   python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
-# Then install NVIDIA PyTorch wheel separately (JetPack 5.1.1 v511, cp38).
+# Install (from this folder): use bash scripts/install_jetson_backend.sh
+# (JP5 aarch64 + Python 3.8 uses polars==0.19.12 + ultralytics --no-deps — see that script.)
 
 # Core
 fastapi==0.104.1
@@ -13,7 +10,7 @@ python-multipart==0.0.6
 python-dotenv>=1.0.0
 
 # AI Vision (torch omitted — install Jetson wheel manually)
-# Polars: use constraints-jetson.txt (wheel-capable version; Ultralytics needs polars>=0.20 only).
+# Ultralytics: on JP5 aarch64 py3.8, install_jetson_backend.sh installs this package --no-deps.
 ultralytics==8.4.47
 onnx>=1.16.0
 onnxruntime==1.16.3

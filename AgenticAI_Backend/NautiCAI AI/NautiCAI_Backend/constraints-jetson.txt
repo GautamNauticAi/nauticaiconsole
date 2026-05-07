@@ -1,7 +1,7 @@
-# Jetson aarch64 + Python 3.8: Polars must come from a wheel, never sdist.
+# Jetson pip constraints (optional `-c` file).
 #
-# Pinning polars==0.20.x forces a source build on many Jetsons → pip pulls "puccinialin"
-# and fails (see https://github.com/ultralytics/ultralytics/issues/22017 ).
+# Do NOT pin Polars here for JP5 + Python 3.8 + aarch64: wheels for polars>=0.20 use
+# manylinux_2_24 tags that older Jetson pip stacks often reject, while polars==0.19.12
+# ships manylinux2014_aarch64 wheels that install reliably.
 #
-# Ultralytics only needs polars>=0.20.0; 1.8+ publishes cp38-abi3 manylinux_2_24_aarch64 wheels.
-polars>=1.8.2,<3
+# scripts/install_jetson_backend.sh installs Polars + Ultralytics on that platform explicitly.
