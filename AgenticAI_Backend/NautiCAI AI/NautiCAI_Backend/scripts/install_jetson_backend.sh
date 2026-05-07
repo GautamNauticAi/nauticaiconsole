@@ -43,14 +43,19 @@ fi
 
 TORCHVISION_SPEC="${TORCHVISION_SPEC:-torchvision==0.15.2}"
 
-echo "==> NVIDIA PyTorch (do not pip install bare 'torch' from PyPI)"
+stamp() { echo "[$(date +%H:%M:%S)] $*"; }
+
+stamp "NVIDIA PyTorch wheel next — download is large; terminal may look idle for many minutes"
+stamp "Upgrading pip / setuptools / wheel..."
 python -m pip install -U pip setuptools wheel
+
+stamp "Downloading + installing torch from NVIDIA (not PyPI). Wait..."
 python -m pip install --no-cache-dir "${NV_TORCH_URL}"
 
-echo "==> torchvision (${TORCHVISION_SPEC}) — --no-deps keeps NVIDIA torch"
+stamp "Installing torchvision (${TORCHVISION_SPEC}) — --no-deps keeps NVIDIA torch"
 python -m pip install "${TORCHVISION_SPEC}" --no-deps
 
-echo "==> Backend deps (torch omitted from requirements.jetson.txt; Polars pinned in constraints)"
+stamp "Installing requirements.jetson.txt (includes git clone of segment-anything — can be slow)..."
 python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.version.cuda)"
