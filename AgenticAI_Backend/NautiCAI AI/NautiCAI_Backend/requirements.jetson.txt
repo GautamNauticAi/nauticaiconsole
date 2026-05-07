@@ -13,7 +13,7 @@ python-multipart==0.0.6
 python-dotenv>=1.0.0
 
 # AI Vision (torch omitted — install Jetson wheel manually)
-# Polars version is pinned via constraints-jetson.txt (Ultralytics dependency).
+# Polars: use constraints-jetson.txt (wheel-capable version; Ultralytics needs polars>=0.20 only).
 ultralytics==8.4.47
 onnx>=1.16.0
 onnxruntime==1.16.3

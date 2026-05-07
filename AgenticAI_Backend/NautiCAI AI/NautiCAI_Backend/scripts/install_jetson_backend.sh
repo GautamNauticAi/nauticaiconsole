@@ -55,6 +55,9 @@ python -m pip install --no-cache-dir "${NV_TORCH_URL}"
 stamp "Installing torchvision (${TORCHVISION_SPEC}) — --no-deps keeps NVIDIA torch"
 python -m pip install "${TORCHVISION_SPEC}" --no-deps
 
+stamp "Polars (binary wheel only — never sdist on Jetson; avoids puccinialin / ultralytics#22017)"
+python -m pip install --only-binary=:all: "polars>=1.8.2,<3"
+
 stamp "Installing requirements.jetson.txt (includes git clone of segment-anything — can be slow)..."
 python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 

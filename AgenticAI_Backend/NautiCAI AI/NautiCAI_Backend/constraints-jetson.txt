@@ -1,3 +1,7 @@
-# Force pip resolver to keep a Polars build that ships aarch64 wheels for py3.8
-# (newer Polars often falls back to sdist + broken/unavailable build deps on Jetson).
-polars==0.20.31
+# Jetson aarch64 + Python 3.8: Polars must come from a wheel, never sdist.
+#
+# Pinning polars==0.20.x forces a source build on many Jetsons → pip pulls "puccinialin"
+# and fails (see https://github.com/ultralytics/ultralytics/issues/22017 ).
+#
+# Ultralytics only needs polars>=0.20.0; 1.8+ publishes cp38-abi3 manylinux_2_24_aarch64 wheels.
+polars>=1.8.2,<3

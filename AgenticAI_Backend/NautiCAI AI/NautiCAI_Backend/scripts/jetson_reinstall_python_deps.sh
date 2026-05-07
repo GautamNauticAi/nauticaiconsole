@@ -19,6 +19,8 @@ BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${BACKEND_DIR}"
 
 echo "==> Python: $(command -v python) — $(python --version 2>&1)"
+echo "==> Polars wheel first (Jetson must not build Polars from source)"
+python -m pip install --only-binary=:all: "polars>=1.8.2,<3"
 echo "==> Installing requirements.jetson.txt + constraints-jetson.txt (does not reinstall torch)"
 python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 
