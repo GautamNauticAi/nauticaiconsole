@@ -12,21 +12,17 @@
 #
 set -euo pipefail
 
+export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${BACKEND_DIR}"
 
 echo "==> Python: $(command -v python) — $(python --version 2>&1)"
-echo "==> Installing requirements-jetson.txt (fpdf, fastapi, opencv, segment-anything, …)"
-pip install -r requirements-jetson.txt
-
-echo "==> ultralytics (no deps — keeps NVIDIA torch)"
-pip install "ultralytics==8.4.30" --no-deps
-
-echo "==> ultralytics runtime libraries"
-pip install matplotlib pyyaml scipy pillow psutil polars ultralytics-thop
+echo "==> Installing requirements.jetson.txt + constraints-jetson.txt (does not reinstall torch)"
+python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 
 echo "==> Quick import check"
 python -c "import fpdf; from fpdf import FPDF; import cv2, fastapi; print('fpdf, cv2, fastapi: OK')"
 
-echo "==> Done. Start API: python nauticai_api.py"
+echo "==> Done. Start API: ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS=1 PYTHONNOUSERSITE=1 python nauticai_api.py"

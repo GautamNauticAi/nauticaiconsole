@@ -11,6 +11,8 @@
 #   python3.8 -m venv .venv && source .venv/bin/activate && bash scripts/install_jetson_backend.sh
 set -euo pipefail
 
+export PYTHONNOUSERSITE="${PYTHONNOUSERSITE:-1}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${BACKEND_DIR}"
@@ -42,22 +44,18 @@ fi
 TORCHVISION_SPEC="${TORCHVISION_SPEC:-torchvision==0.15.2}"
 
 echo "==> NVIDIA PyTorch (do not pip install bare 'torch' from PyPI)"
-pip install --no-cache-dir "${NV_TORCH_URL}"
+python -m pip install -U pip setuptools wheel
+python -m pip install --no-cache-dir "${NV_TORCH_URL}"
 
 echo "==> torchvision (${TORCHVISION_SPEC}) — --no-deps keeps NVIDIA torch"
-pip install "${TORCHVISION_SPEC}" --no-deps
+python -m pip install "${TORCHVISION_SPEC}" --no-deps
 
-echo "==> Core requirements (no torch / no ultralytics in file)"
-pip install -r requirements-jetson.txt
-
-echo "==> ultralytics without deps (otherwise pip upgrades torch)"
-pip install "ultralytics==8.4.30" --no-deps
-
-echo "==> ultralytics runtime deps (not torch/torchvision)"
-pip install matplotlib pyyaml scipy pillow psutil polars ultralytics-thop
+echo "==> Backend deps (torch omitted from requirements.jetson.txt; Polars pinned in constraints)"
+python -m pip install -r requirements.jetson.txt -c constraints-jetson.txt
 
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.version.cuda)"
 
-echo "==> Done. Start API: python nauticai_api.py"
+echo "==> Done. Start API (example):"
+echo "    ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS=1 PYTHONNOUSERSITE=1 python nauticai_api.py"
 echo "    Optional: cp .env.jetson.example .env  # Jetson-tuned NAUTICAI_* defaults + comments"
 echo "    If you only need to fix missing fpdf/fastapi (torch already OK): bash scripts/jetson_reinstall_python_deps.sh"
