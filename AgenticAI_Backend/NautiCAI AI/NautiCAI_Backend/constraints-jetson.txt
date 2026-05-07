@@ -1,0 +1,3 @@
+# Force pip resolver to keep a Polars build that ships aarch64 wheels for py3.8
+# (newer Polars often falls back to sdist + broken/unavailable build deps on Jetson).
+polars==0.20.31

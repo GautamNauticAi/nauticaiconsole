@@ -1,0 +1,55 @@
+{
+  "image": "330acf8aae5c457d913e4d495b1e7b8a.jpg",
+  "image_path": "temp_uploads\\330acf8aae5c457d913e4d495b1e7b8a.jpg",
+  "image_width": 312,
+  "image_height": 312,
+  "image_area_pixels": 97344,
+  "num_detections": 2,
+  "total_fouling_pixels": 142740,
+  "coverage_percent": 100.0,
+  "severity": "High",
+  "annotated_path": "C:/Users/chara/Documents/NauticAi_Frontend/NautiCAI/pipeline_outputs\\annotated\\330acf8aae5c457d913e4d495b1e7b8a_annotated.jpg",
+  "overlay_path": null,
+  "union_mask_path": null,
+  "detections": [
+    {
+      "id": 0,
+      "class_name": "corrosion",
+      "confidence": 0.5122,
+      "bbox_xyxy": [
+        0,
+        0,
+        312,
+        312
+      ],
+      "bbox_area_pixels": 97344,
+      "mask_pixels": 97344,
+      "coverage_percent_of_image": 100.0,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    },
+    {
+      "id": 1,
+      "class_name": "paint_peel",
+      "confidence": 0.4117,
+      "bbox_xyxy": [
+        1,
+        0,
+        292,
+        156
+      ],
+      "bbox_area_pixels": 45396,
+      "mask_pixels": 45396,
+      "coverage_percent_of_image": 46.6346,
+      "mask_path": null,
+      "crop_path": null,
+      "crop_box_xyxy": null,
+      "species": null,
+      "species_confidence": null
+    }
+  ],
+  "engine": "prasad_multimodel_nauticai"
+}

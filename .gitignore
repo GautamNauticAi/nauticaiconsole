@@ -45,3 +45,6 @@ checkpoints/
 openclaw/.batch_vessel_counters.json
 openclaw/.batch_vessel_counters.json.tmp
 
+# Local Cursor chat exports (often contain pasted secrets — never commit)
+Cursor/
+
