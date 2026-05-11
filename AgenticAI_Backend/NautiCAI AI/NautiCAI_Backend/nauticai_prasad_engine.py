@@ -10,6 +10,10 @@ Weights directory:
   NAUTICAI_PRASAD_MODEL_DIR or NAUTICAI_PRASAD_REPO — folder with models (optional model_2/, deploy paths).
   Default: <this backend>/prasad_models
 
+TensorRT ``.engine`` files often omit class names; Ultralytics then reports placeholders ``class0``, ``class1``, ….
+Optional sidecar next to each weight: ``<same_stem>.names.txt`` (or ``.names``) — one label per line in class-index order.
+Lines starting with ``#`` are ignored.
+
 Env (legacy + optional overrides):
   YOLO_CONF, YOLO_IOU, MERGE_IOU, YOLO_IMGSZ — legacy defaults; v2 ONNX stack uses guide values unless set.
 """
@@ -180,9 +184,48 @@ def _all_v2_onnx_present(base: str) -> bool:
         return False
 
 
+def _parse_names_sidecar(weight_path: str) -> Optional[dict[int, str]]:
+    """Load ``{class_index: name}`` from ``<stem>.names.txt`` or ``<stem>.names`` beside the weight."""
+    base = os.path.splitext(weight_path)[0]
+    for suffix in (".names.txt", ".names"):
+        p = base + suffix
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                lines: List[str] = []
+                for ln in f:
+                    s = ln.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    lines.append(s)
+            if lines:
+                return {i: n for i, n in enumerate(lines)}
+        except OSError:
+            continue
+    return None
+
+
+def _apply_names_sidecar(m: YOLO, weight_path: str) -> None:
+    parsed = _parse_names_sidecar(weight_path)
+    if not parsed:
+        return
+    inner = getattr(m, "model", None)
+    if inner is not None and hasattr(inner, "names"):
+        try:
+            inner.names = parsed
+        except Exception:
+            pass
+    print(
+        f"[Prasad engine] applied {len(parsed)} labels from sidecar — "
+        f"{os.path.basename(weight_path)}"
+    )
+
+
 def _load_yolo_path(path: str, label: str) -> Optional[YOLO]:
     try:
         m = YOLO(path, task="detect")
+        _apply_names_sidecar(m, path)
         if USE_HALF and path.endswith(".pt") and not path.endswith(".onnx"):
             try:
                 m.model = m.model.half()
