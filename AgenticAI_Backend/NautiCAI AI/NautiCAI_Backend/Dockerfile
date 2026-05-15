@@ -3,7 +3,7 @@
 # Run:   docker run -p 8000:8000 -e POSTGRES_DSN=... -e JWT_SECRET=... nauticai-api
 # Cloud Run sets PORT; do not set NAUTICAI_START_TELEGRAM_BOT or TELEGRAM_BOT_TOKEN here.
 #
-# Model weights are stored in GCS bucket gs://nauticai-models/ and downloaded at build time.
+# Model weights: private GCS bucket + download_models.sh (Cloud Run SA = storage.objectViewer).
 # To update models: upload new files to GCS, rebuild & redeploy.
 FROM python:3.11-slim
 
