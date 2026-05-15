@@ -13,6 +13,12 @@
 #   GCS_AISHWARYA_PREFIX   default aishwarya — set to Aishwarya if your folder uses that casing
 
 # Do not use set -e: optional model files may fail; API should still start when core set loads.
+# Cloud Run sometimes sets GCS_MODEL_BUCKET to empty string — treat empty like unset.
+if [ -z "${GCS_MODEL_BUCKET:-}" ]; then
+  BUCKET="nauticai-models-967866644933"
+else
+  BUCKET="${GCS_MODEL_BUCKET}"
+fi
 AIS_PRE="${GCS_AISHWARYA_PREFIX:-aishwarya}"
 
 # Optional OAuth token from Cloud Run / GCE metadata (Storage read scope)
