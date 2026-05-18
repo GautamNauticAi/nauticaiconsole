@@ -763,6 +763,24 @@ def create_combined_pdf(vessel_id, report_payloads, output_folder, annotated_pat
     return pdf_path
 
 
+def _sync_vessel_reports_from_gcs(user_id: int, vessel_id: str, reports_folder: str) -> None:
+    try:
+        import report_gcs
+
+        report_gcs.sync_vessel_artifacts_to_local(user_id, vessel_id, reports_folder)
+    except Exception as e:
+        print(f"sync_vessel_reports_from_gcs: {e}")
+
+
+def _persist_vessel_reports_to_gcs(user_id: int, vessel_id: str, reports_folder: str) -> None:
+    try:
+        import report_gcs
+
+        report_gcs.persist_vessel_reports(user_id, vessel_id, reports_folder)
+    except Exception as e:
+        print(f"persist_vessel_reports_to_gcs: {e}")
+
+
 def _collect_report_payloads(reports_folder, vessel_id, max_images: Optional[int] = None):
     """
     Load per-image reports: _0.json, _1.json, ... in order.
@@ -905,6 +923,7 @@ async def telegram_latest_pdf(username: str):
             raise HTTPException(status_code=404, detail="No inspections yet. Run an inspection in the web app first.")
         vessel_id = latest["vessel_id"]
         reports_folder = _reports_folder(uid)
+        _sync_vessel_reports_from_gcs(uid, vessel_id, reports_folder)
         pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
         if not os.path.isfile(pdf_path):
             # Build PDF on demand if we have JSON
@@ -1297,6 +1316,7 @@ async def run_inspection_batch(
         _invalidate_vessels_cache(uid)
         ts_utc = datetime.now(timezone.utc)
         _insert_agentic_inspection_row(uid, vessel_id, ts_utc, len(report_payloads))
+        _persist_vessel_reports_to_gcs(uid, vessel_id, reports_folder)
         if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
             try:
@@ -1376,6 +1396,7 @@ async def run_inspection(
 
         ts_utc = datetime.now(timezone.utc)
         _insert_agentic_inspection_row(uid, vessel_id, ts_utc, len(report_payloads))
+        _persist_vessel_reports_to_gcs(uid, vessel_id, reports_folder)
 
         if _http_inspection_telegram_notify_enabled(request):
             pdf_path = os.path.join(reports_folder, f"{vessel_id}_Audit_Report.pdf")
@@ -1404,6 +1425,7 @@ async def get_vessel_reports(vessel_id: str, authorization: Optional[str] = Head
     uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(uid)
+    _sync_vessel_reports_from_gcs(uid, vessel_id, reports_folder)
     expected_count = _latest_image_count_for_vessel(uid, vessel_id)
     collected = _collect_report_payloads(reports_folder, vessel_id, max_images=expected_count)
     report_payloads = [p for _, p in collected]
@@ -1416,6 +1438,7 @@ async def get_latest_report(vessel_id: str, authorization: Optional[str] = Heade
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
+    _sync_vessel_reports_from_gcs(user["id"], vessel_id, reports_folder)
     try:
         json_path = os.path.join(reports_folder, f"{vessel_id}_inspection_data.json")
         with open(json_path, "r") as f:
@@ -1433,6 +1456,7 @@ async def get_annotated_image(vessel_id: str, index: int = 0, authorization: Opt
     user = _require_auth(authorization)
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(user["id"])
+    _sync_vessel_reports_from_gcs(user["id"], vessel_id, reports_folder)
     if index <= 0:
         annotated_path = os.path.join(reports_folder, f"{vessel_id}_annotated.jpg")
     else:
@@ -1451,12 +1475,14 @@ async def download_pdf(vessel_id: str, authorization: Optional[str] = Header(Non
     uid = user["id"]
     vessel_id = _sanitize_vessel_id(vessel_id)
     reports_folder = _reports_folder(uid)
+    _sync_vessel_reports_from_gcs(uid, vessel_id, reports_folder)
     expected_count = _latest_image_count_for_vessel(uid, vessel_id)
     collected = _collect_report_payloads(reports_folder, vessel_id, max_images=expected_count)
     if not collected:
         raise HTTPException(
             status_code=404,
-            detail=f"No inspection report found for vessel {vessel_id}"
+            detail=f"No inspection report found for vessel {vessel_id}. "
+            "If this was a cloud upload, redeploy the backend with GCS report persistence or re-run the inspection.",
         )
     if len(collected) > 1:
         report_payloads = [p for _, p in collected]
@@ -1730,6 +1756,7 @@ async def get_all_vessels(authorization: Optional[str] = Header(None)):
             conn.close()
             for row in rows:
                 vessel_id = row["vessel_id"]
+                _sync_vessel_reports_from_gcs(uid, vessel_id, reports_folder)
                 paths = _json_paths_for_vessel(reports_folder, vessel_id)
                 data = _load_inspection_data_from_paths(paths)
                 ts = row["last_inspection"]

@@ -372,7 +372,7 @@ export default function ReportsPage() {
                         {ins.status === "completed" && (
                           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
                             <Link href={`/results/${encodeURIComponent(ins.inspection_id)}`} style={{ fontSize: 12, fontWeight: 600, color: "rgba(148,163,184,0.95)", textDecoration: "underline" }}>Results</Link>
-                            <button type="button" onClick={async () => { try { await api.downloadAgenticPdf(ins.inspection_id); } catch { window.alert("Download failed. Make sure you are logged in."); } }} style={{ fontSize: 12, fontWeight: 600, color: "rgba(148,163,184,0.95)", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>PDF</button>
+                            <button type="button" onClick={async () => { try { await api.downloadAgenticPdf(ins.inspection_id); } catch (e) { window.alert(e instanceof Error ? e.message : "PDF download failed."); } }} style={{ fontSize: 12, fontWeight: 600, color: "rgba(148,163,184,0.95)", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>PDF</button>
                             <button
                               type="button"
                               onClick={() => openDeleteModal(ins)}

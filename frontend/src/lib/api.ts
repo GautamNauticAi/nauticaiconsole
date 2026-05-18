@@ -422,7 +422,11 @@ export const api = {
     if (typeof window === "undefined") return;
     const path = `/api/vessel/${encodeURIComponent(vesselId)}/pdf`;
     const res = await fetch(`${BASE}${path}`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const detail = (body as { detail?: string })?.detail;
+      throw new Error(detail || `Failed to download PDF (${res.status})`);
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const filename = `${vesselId}_Audit_Report.pdf`;
