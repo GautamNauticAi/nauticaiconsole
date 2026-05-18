@@ -8,12 +8,12 @@ The frontend does **not** run the model itself. It calls the **FastAPI backend**
 
 1. **Extract** Prasad's project from the zip.
 2. **Locate** the trained weights file in his project:
-   - Usually: `runs/detect/train/weights/best.pt` (Ultralytics training output), or  
-   - A file named `best.pt` / `best (2).pt` in the project root.
+  - Usually: `runs/detect/train/weights/best.pt` (Ultralytics training output), or  
+  - A file named `best.pt` / `best (2).pt` in the project root.
 3. **Replace** the existing weights in this backend folder:
-   - **Replace:** `NautiCAI/best.pt` (the current model file, same folder as `api.py`)
-   - **With:** Prasad's new `best.pt` (copy it in and name it `best.pt`).
-   - Optional: back up the old one first (e.g. rename to `best_old.pt`).
+  - **Replace:** `NautiCAI/best.pt` (the current model file, same folder as `api.py`)
+  - **With:** Prasad's new `best.pt` (copy it in and name it `best.pt`).
+  - Optional: back up the old one first (e.g. rename to `best_old.pt`).
 
 After that, restart the API. It will load the new model automatically. No frontend or code changes needed.
 
@@ -25,13 +25,10 @@ You can point the backend to Prasad's weights **without** overwriting your curre
 
 1. Put Prasad's weights file somewhere (e.g. `NautiCAI/models/prasad_best.pt`).
 2. In `NautiCAI/.env`, set:
-   ```env
+  ```env
    NAUTICAI_MODEL_PATH=models/prasad_best.pt
-   ```
+  ```
    Or use an absolute path:
-   ```env
-   NAUTICAI_MODEL_PATH=C:\path\to\prasad_project\best.pt
-   ```
 3. Restart the API: `uvicorn api:app --reload --port 8000`.
 
 ---
@@ -60,11 +57,11 @@ If you don’t set this, the default metrics in code are used.
 
 ## Quick checklist
 
-- [ ] Extracted zip and found `best.pt` (or equivalent) in Prasad's project  
-- [ ] Replaced `NautiCAI/best.pt` **or** set `NAUTICAI_MODEL_PATH` in `.env`  
-- [ ] (Optional) Set `NAUTICAI_MODEL_METRICS` in `.env`  
-- [ ] Restarted the API  
-- [ ] Run an inspection from the frontend to verify detections and metrics  
+- Extracted zip and found `best.pt` (or equivalent) in Prasad's project  
+- Replaced `NautiCAI/best.pt` **or** set `NAUTICAI_MODEL_PATH` in `.env`  
+- (Optional) Set `NAUTICAI_MODEL_METRICS` in `.env`  
+- Restarted the API  
+- Run an inspection from the frontend to verify detections and metrics
 
 No frontend code changes are required; the existing Inspect flow already uses the backend that loads this model.
 

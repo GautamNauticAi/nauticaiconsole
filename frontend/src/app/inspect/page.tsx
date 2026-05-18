@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
 import { api } from "@/lib/api";
 import type { AgenticInspectResponse, NdtInputData } from "@/types";
@@ -245,7 +246,10 @@ export default function InspectPage() {
               lineHeight: 1.5,
             }}
           >
-            Upload hull footage, add context, then run the YOLOv8 model to generate a structured inspection.
+            Upload hull footage, add context, then run the YOLOv8 model to generate a structured inspection.{" "}
+            <Link href="/upload" style={{ color: "#93c5fd", fontWeight: 600 }}>
+              Cloud upload (AWS hull / pipeline)
+            </Link>
           </p>
         </div>
 

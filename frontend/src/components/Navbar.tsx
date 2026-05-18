@@ -126,6 +126,7 @@ export function Navbar() {
         {[
           { label: "Dashboard", href: "/dashboard", external: false },
           { label: "Inspect", href: "/inspect", external: false },
+          { label: "Cloud upload", href: "/upload", external: false },
           { label: "Reports", href: "/reports", external: false },
           {
             label: "About",
